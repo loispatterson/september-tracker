@@ -4,6 +4,9 @@ import { todayStr, prettyDate, septDates, septDayNum, SEPT_START, SEPT_END, addD
 import { currentStreak, bestStreak, totalHits, dayResult, HIT, MISS, PENDING } from "./streaks.js";
 import { getSuggestions } from "./suggestions.js";
 import { funPromptFor } from "./fun.js";
+import { buildLogs } from "./logs.js";
+import { galleryItems } from "./imageutil.js";
+import { prepareUpload, blobToBase64, hydratePhotos, forgetPhoto, cachedUrl } from "./photos.js";
 
 const ME_KEY = "septTracker.me";
 const ACTIVITIES = ["Run", "Walk", "Gym", "Cycle", "Swim", "Yoga", "Class", "Other"];
@@ -14,7 +17,7 @@ const EMOJIS = ["💪", "🏃", "🚴", "🧘", "🏊", "⚡", "🔥", "🌟", "
 /* ---------- state ---------- */
 let board = { users: [], entries: [], funIdeas: [] };
 let me = null;                    /* { id, name } from localStorage */
-let exLog = {}, funLog = {};      /* log[date][userId] = entry */
+let exLog = {}, funLog = {}, photoLog = {};   /* log[date][userId] = entry */
 let suggestions = [];
 
 /* ephemeral UI state — never persisted */
@@ -31,6 +34,12 @@ const ui = {
   funOwn: false,
   cell: null,                     /* { userId, date } open popover */
   loading: true,
+  photoTarget: null,              /* date the picker was opened for */
+  photoDraft: null,               /* { date, blob, previewUrl, w, h, bytes } */
+  photoBusy: false,
+  photoError: "",
+  lightbox: null,                 /* { photoId, name, emoji, date, activity } */
+  confirmFunClear: null,          /* date awaiting "this deletes your photo" */
 };
 
 /* ---------- helpers ---------- */
@@ -53,12 +62,7 @@ function myProfile() {
 function entryFor(log, ds, userId) { return (log[ds] && log[ds][userId]) || null; }
 
 function rebuildLogs() {
-  exLog = {}; funLog = {};
-  for (const e of board.entries) {
-    const log = e.kind === "fun" ? funLog : exLog;
-    if (!log[e.date]) log[e.date] = {};
-    log[e.date][e.user_id] = e;
-  }
+  ({ exLog, funLog, photoLog } = buildLogs(board.entries));
 }
 
 /* ---------- data ---------- */
@@ -232,11 +236,20 @@ function renderToday() {
   const prompt = funPromptFor(me.id, today, board.funIdeas, ui.funSwap);
   let funHtml;
   if (fun && fun.done) {
+    const clearing = ui.confirmFunClear === today;
     funHtml = `<div class="done-banner fun">
         <span>🎉 ${esc(fun.activity || "Something fun")}</span>
-        <button class="btn small" data-action="undo-fun">Undo</button>
+        ${clearing ? "" : `<button class="btn small" data-action="undo-fun">Undo</button>`}
       </div>
-      ${fun.note ? `<p class="small muted">${esc(fun.note)}</p>` : ""}`;
+      ${clearing ? `<div class="photo-error">
+          ⚠️ Undoing this also deletes today's photo.
+          <div class="actions">
+            <button class="btn small" data-action="undo-fun-confirm">Undo and delete photo</button>
+            <button class="btn small ghost" data-action="undo-fun-cancel">Keep it</button>
+          </div>
+        </div>` : ""}
+      ${fun.note ? `<p class="small muted">${esc(fun.note)}</p>` : ""}
+      ${photoSection(today, fun)}`;
   } else if (ui.funOwn) {
     funHtml = `<div class="field">
         <label>What did you do (or plan to do)?</label>
@@ -253,7 +266,8 @@ function renderToday() {
         <button class="btn good" data-action="log-fun" data-text="${esc(prompt)}">Did it 🎉</button>
         <button class="btn ghost" data-action="swap-fun">Swap idea</button>
         <button class="btn ghost" data-action="toggle-fun-own">My own idea</button>
-      </div>`;
+      </div>
+      ${photoSection(today, null)}`;
   }
 
   /* --- friends strip --- */
@@ -282,6 +296,99 @@ function renderToday() {
     </div>`;
 }
 
+/* ---------- photos ---------- */
+
+/* The photo control under the fun card: add, preview-before-upload,
+   uploading, or the photo you already have. */
+function photoSection(ds, fun) {
+  const draft = ui.photoDraft && ui.photoDraft.date === ds ? ui.photoDraft : null;
+  const photoId = fun && fun.photo_id;
+  const err = ui.photoError ? `<div class="photo-error">${esc(ui.photoError)}</div>` : "";
+
+  if (ui.photoBusy && ui.photoTarget === ds) {
+    return `${err}<div class="photo-wrap">
+      ${draft ? `<img class="photo-thumb uploading" src="${draft.previewUrl}" alt="">` : ""}
+      <p class="photo-meta">Uploading…</p>
+    </div>`;
+  }
+
+  if (draft) {
+    return `${err}<div class="photo-wrap">
+      <img class="photo-thumb" src="${draft.previewUrl}" alt="">
+      <p class="photo-meta">${Math.round(draft.bytes / 1024)} KB, ${draft.w}×${draft.h}</p>
+      <div class="actions">
+        <button class="btn primary" data-action="photo-confirm" data-date="${ds}">Use this photo</button>
+        <button class="btn ghost" data-action="pick-photo" data-date="${ds}">Choose another</button>
+        <button class="btn ghost" data-action="photo-cancel">Cancel</button>
+      </div>
+    </div>`;
+  }
+
+  if (photoId) {
+    return `${err}<div class="photo-wrap">
+      <img class="photo-thumb" data-photo="${esc(photoId)}" data-action="photo-open"
+           data-photo-id="${esc(photoId)}" data-id="${me.id}" data-date="${ds}" alt="Your photo">
+      <div class="actions">
+        <button class="btn ghost small" data-action="pick-photo" data-date="${ds}">Replace</button>
+        <button class="btn ghost small" data-action="photo-remove" data-date="${ds}">Remove</button>
+      </div>
+    </div>`;
+  }
+
+  return `${err}<div class="actions">
+    <button class="btn ghost" data-action="pick-photo" data-date="${ds}">📷 Add a photo</button>
+  </div>${photoStreakLine(ds)}`;
+}
+
+/* The nudge: only worth showing when there's a streak to lose. */
+function photoStreakLine(ds) {
+  const since = joinedOf(getUser(me.id) || {});
+  const n = currentStreak(me.id, photoLog, ds, since);
+  const hasToday = !!(photoLog[ds] && photoLog[ds][me.id]);
+  if (hasToday && n >= 2) return `<p class="photo-meta">📸 ${n}-day photo streak</p>`;
+  if (!hasToday && n >= 1) {
+    return `<p class="photo-meta">📸 ${n}-day photo streak, add today's photo to keep it</p>`;
+  }
+  return "";
+}
+
+function renderGallery() {
+  const items = galleryItems(board.entries, board.users);
+  const mine = me ? currentStreak(me.id, photoLog, todayStr(), joinedOf(getUser(me.id) || {})) : 0;
+  const myTotal = me ? totalHits(me.id, photoLog, todayStr(), joinedOf(getUser(me.id) || {})) : 0;
+
+  const people = new Set(items.map(i => i.userId)).size;
+  const header = `<div class="card">
+    <h2>📸 Photos</h2>
+    <p class="small">You: 📸 ${mine} in a row, ${myTotal} photo${myTotal === 1 ? "" : "s"}.
+      ${items.length} in all from ${people} ${people === 1 ? "person" : "people"}.</p>
+    <p class="small muted">A photo streak counts days in a row with a photo, so a fun day
+      without one breaks it.</p>
+  </div>`;
+
+  if (!items.length) {
+    return header + `<div class="card"><p class="muted">No photos yet. Add one from Today.</p></div>`;
+  }
+
+  return header + `<div class="gallery">${items.map(i => `
+    <button class="gtile" data-action="photo-open" data-photo-id="${esc(i.photoId)}"
+            data-id="${esc(i.userId)}" data-date="${i.date}">
+      <img data-photo="${esc(i.photoId)}" alt="${esc(i.name)}, ${esc(prettyDate(i.date))}">
+      <span class="gcap">${i.emoji} ${septDayNum(i.date)}</span>
+    </button>`).join("")}</div>`;
+}
+
+function renderLightbox() {
+  const lb = ui.lightbox;
+  if (!lb) return "";
+  return `<div class="lightbox" data-action="photo-close">
+    <img data-photo="${esc(lb.photoId)}" alt="">
+    <div class="cap">${lb.emoji} ${esc(lb.name)} · ${esc(prettyDate(lb.date))}${
+      lb.activity ? " · " + esc(lb.activity) : ""}</div>
+    <button class="btn" data-action="photo-close">Close</button>
+  </div>`;
+}
+
 /* ---------- board ---------- */
 /* When someone joined: clamps to Sept 1, so days before they joined read as
    "not their problem" rather than misses. */
@@ -308,19 +415,27 @@ function renderBoard() {
     const since = joinedOf(u);
     const cells = dates.map(ds => {
       const fun = entryFor(funLog, ds, u.id);
+      const hasPhoto = !!(photoLog[ds] && photoLog[ds][u.id]);
       return `<button class="cell ${cellClass(u.id, ds, today, since)}" data-action="cell" data-id="${u.id}" data-date="${ds}">
-        ${septDayNum(ds)}${fun && fun.done ? '<span class="fun-dot"></span>' : ""}
+        ${septDayNum(ds)}${fun && fun.done
+          ? `<span class="fun-dot${hasPhoto ? " photo" : ""}"></span>` : ""}
       </button>`;
     }).join("");
     const cur = currentStreak(u.id, exLog, today, since);
     const best = bestStreak(u.id, exLog, today, since);
     const tot = totalHits(u.id, exLog, today, since);
+    const funStreak = currentStreak(u.id, funLog, today, since);
+    const photoStreak = currentStreak(u.id, photoLog, today, since);
     const panel = ui.cell && ui.cell.userId === u.id ? cellPanel(u, ui.cell.date, today) : "";
     return `<div class="card board-user">
       <div class="board-head">
         <span>${u.emoji}</span>
         <b>${esc(u.name)}</b>
+      </div>
+      <div class="streaks">
         <span class="stats">🔥 ${cur} · best ${best} · ${tot}/30</span>
+        <span class="stats fun">🎉 ${funStreak}</span>
+        <span class="stats photo">📸 ${photoStreak}</span>
       </div>
       <div class="grid30">${cells}</div>
       ${panel}
@@ -343,6 +458,9 @@ function cellPanel(u, ds, today) {
   return `<div class="panel">
     <b>${esc(prettyDate(ds))}</b>
     ${lines.map(l => `<div class="small">${l}</div>`).join("")}
+    ${fun && fun.photo_id ? `<img class="panel-photo" data-photo="${esc(fun.photo_id)}"
+        data-action="photo-open" data-photo-id="${esc(fun.photo_id)}"
+        data-id="${esc(u.id)}" data-date="${ds}" alt="Photo from ${esc(u.name)}">` : ""}
     ${editable ? `<div class="row">
       ${ex && ex.done
         ? `<button class="btn small" data-action="backfill" data-date="${ds}" data-kind="exercise" data-done="0">Clear exercise</button>`
@@ -425,7 +543,7 @@ function show(id, html) {
 }
 
 function render() {
-  for (const id of ["view-onboard", "view-today", "view-board", "view-profile"]) {
+  for (const id of ["view-onboard", "view-today", "view-board", "view-gallery", "view-profile"]) {
     document.getElementById(id).classList.add("hidden");
   }
   const tabs = document.getElementById("tabs");
@@ -446,7 +564,14 @@ function render() {
   for (const b of tabs.querySelectorAll("button")) b.classList.toggle("on", b.dataset.tab === ui.tab);
   if (ui.tab === "today") show("view-today", renderToday());
   else if (ui.tab === "board") show("view-board", renderBoard());
+  else if (ui.tab === "gallery") show("view-gallery", renderGallery());
   else show("view-profile", renderProfile());
+
+  /* The lightbox lives outside <main> so switching views doesn't destroy it. */
+  document.getElementById("lightbox").innerHTML = renderLightbox();
+  /* Fills every <img data-photo> above: cached ones synchronously, so the
+     60-second refresh doesn't make the gallery flicker. */
+  hydratePhotos(document);
 }
 
 async function loadSuggestions() {
@@ -464,7 +589,87 @@ async function onClick(ev) {
   const a = el.dataset.action;
   const today = todayStr();
 
-  if (a === "tab") { ui.tab = el.dataset.tab; ui.cell = null; render(); return; }
+  if (a === "tab") {
+    ui.tab = el.dataset.tab;
+    ui.cell = null; ui.lightbox = null; ui.confirmFunClear = null;
+    render();
+    return;
+  }
+
+  /* ---- photos ---- */
+  if (a === "pick-photo") {
+    ui.photoTarget = el.dataset.date;
+    ui.photoError = "";
+    clearDraft();
+    render();
+    document.getElementById("photo-input").click();
+    return;
+  }
+
+  if (a === "photo-cancel") { clearDraft(); ui.photoError = ""; render(); return; }
+
+  if (a === "photo-confirm") {
+    const ds = el.dataset.date;
+    const draft = ui.photoDraft;
+    if (!draft || draft.date !== ds) return;
+    ui.photoBusy = true; ui.photoError = ""; render();
+    try {
+      /* A photo needs a fun entry to attach to. The server creates one if it's
+         missing, but logging here first keeps the local view honest. */
+      const existing = entryFor(funLog, ds, me.id);
+      const activity = existing && existing.activity
+        ? existing.activity
+        : funPromptFor(me.id, ds, board.funIdeas, ui.funSwap);
+      const b64 = await blobToBase64(draft.blob);
+      const old = existing && existing.photo_id;
+      await api.uploadPhoto({ date: ds, b64, mime: "image/jpeg", w: draft.w, h: draft.h, activity });
+      if (old) forgetPhoto(old);
+      clearDraft();
+      await refresh();
+      toast("Photo added 📸");
+    } catch (e) {
+      console.error(e);
+      if (isAuthError(e)) { ui.photoBusy = false; return signedOut(); }
+      ui.photoError = errorMessage(e) || "Couldn't upload that photo";
+    } finally {
+      ui.photoBusy = false;
+      ui.photoTarget = null;
+      render();
+    }
+    return;
+  }
+
+  if (a === "photo-remove") {
+    const ds = el.dataset.date;
+    const existing = entryFor(funLog, ds, me.id);
+    try {
+      await api.deletePhoto(ds);
+      if (existing && existing.photo_id) forgetPhoto(existing.photo_id);
+      await refresh();
+      toast("Photo removed");
+      render();
+    } catch (e) {
+      if (isAuthError(e)) return signedOut();
+      toast("Couldn't remove that photo");
+    }
+    return;
+  }
+
+  if (a === "photo-open") {
+    const u = getUser(el.dataset.id) || {};
+    const ds = el.dataset.date;
+    const fun = entryFor(funLog, ds, el.dataset.id);
+    ui.lightbox = {
+      photoId: el.dataset.photoId, name: u.name || "", emoji: u.emoji || "",
+      date: ds, activity: (fun && fun.activity) || "",
+    };
+    render();
+    return;
+  }
+
+  if (a === "photo-close") { ui.lightbox = null; render(); return; }
+
+  if (a === "undo-fun-cancel") { ui.confirmFunClear = null; render(); return; }
 
   if (a === "retry") {
     ui.loading = true; render();
@@ -579,7 +784,26 @@ async function onClick(ev) {
     toast("Fun logged 🎉");
     return;
   }
-  if (a === "undo-fun") { await saveEntry({ date: today, kind: "fun", done: null }); return; }
+  if (a === "undo-fun") {
+    /* Un-logging fun cascades the photo away in the database, so ask once. */
+    const fun = entryFor(funLog, today, me.id);
+    if (fun && fun.photo_id && ui.confirmFunClear !== today) {
+      ui.confirmFunClear = today;
+      render();
+      return;
+    }
+    ui.confirmFunClear = null;
+    await saveEntry({ date: today, kind: "fun", done: null });
+    return;
+  }
+
+  if (a === "undo-fun-confirm") {
+    const fun = entryFor(funLog, today, me.id);
+    if (fun && fun.photo_id) forgetPhoto(fun.photo_id);
+    ui.confirmFunClear = null;
+    await saveEntry({ date: today, kind: "fun", done: null });
+    return;
+  }
 
   if (a === "cell") {
     const key = { userId: el.dataset.id, date: el.dataset.date };
@@ -652,9 +876,38 @@ async function onClick(ev) {
 }
 
 /* ---------- boot ---------- */
+/* Drop a pending draft and release its preview URL. */
+function clearDraft() {
+  if (ui.photoDraft) URL.revokeObjectURL(ui.photoDraft.previewUrl);
+  ui.photoDraft = null;
+}
+
+async function onPhotoPicked(ev) {
+  const file = ev.target.files && ev.target.files[0];
+  /* Reset immediately so picking the same file again still fires a change. */
+  ev.target.value = "";
+  if (!file) return;
+
+  ui.photoBusy = true; ui.photoError = ""; render();
+  try {
+    const draft = await prepareUpload(file);
+    draft.date = ui.photoTarget || todayStr();
+    ui.photoDraft = draft;
+  } catch (e) {
+    console.error(e);
+    ui.photoError = e && e.code === "decode"
+      ? "Couldn't read that photo. If it's an iPhone HEIC, try Settings → Camera → Formats → Most Compatible, or share it from Photos as a JPEG."
+      : "Something went wrong preparing that photo";
+  } finally {
+    ui.photoBusy = false;
+    render();
+  }
+}
+
 async function boot() {
   try { me = JSON.parse(localStorage.getItem(ME_KEY) || "null"); } catch { me = null; }
   document.addEventListener("click", onClick);
+  document.getElementById("photo-input").addEventListener("change", onPhotoPicked);
   render();
   await refresh();
   if (me && getUser(me.id)) await loadSuggestions();
@@ -665,6 +918,8 @@ async function boot() {
     if (!document.hidden && me) { await refresh(); render(); }
   });
   setInterval(async () => {
+    /* Never re-render underneath an upload or a pending draft. */
+    if (ui.photoBusy || ui.photoDraft) return;
     if (!document.hidden && me && !ui.needPasscode) { await refresh(); render(); }
   }, 60000);
 }

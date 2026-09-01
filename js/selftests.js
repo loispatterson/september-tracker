@@ -6,6 +6,8 @@ import { currentStreak, bestStreak, totalHits, dayResult, HIT, MISS, PENDING, NE
 import { pickWorkouts, hashStr } from "./suggestions.js";
 import { WORKOUTS } from "./data/workouts.js";
 import { funPromptFor, funPool } from "./fun.js";
+import { buildLogs } from "./logs.js";
+import { readExifOrientation, orientationTransform, fitDimensions, galleryItems } from "./imageutil.js";
 
 export function runSelfTests() {
   let pass = 0, fail = 0;
@@ -100,6 +102,98 @@ export function runSelfTests() {
     funPromptFor(U, "2026-09-01", [{ text: "z" }]) !== undefined, true);
   check("decks differ between users",
     septDates().map(ds => funPromptFor(V, ds, [])).join("|") !== month.join("|"), true);
+
+  /* ---- buildLogs + the photo streak ---- */
+  const P = "u_p";
+  const photoEntries = [
+    { user_id: P, date: "2026-09-01", kind: "fun", done: true, photo_id: "p1" },
+    { user_id: P, date: "2026-09-02", kind: "fun", done: true, photo_id: "p2" },
+    { user_id: P, date: "2026-09-03", kind: "fun", done: true, photo_id: null },  /* fun, no photo */
+    { user_id: P, date: "2026-09-04", kind: "fun", done: true, photo_id: "p4" },
+    { user_id: P, date: "2026-09-05", kind: "fun", done: true, photo_id: null },  /* today, not yet */
+    { user_id: P, date: "2026-09-02", kind: "exercise", done: true, photo_id: "ignored" },
+  ];
+  const L = buildLogs(photoEntries);
+  const pToday = "2026-09-05";
+  check("buildLogs splits exercise from fun", Object.keys(L.exLog), ["2026-09-02"]);
+  check("buildLogs keeps all fun days", Object.keys(L.funLog).length, 5);
+  check("photoLog only has days with a photo", Object.keys(L.photoLog), ["2026-09-01", "2026-09-02", "2026-09-04"]);
+  check("photoLog rows are {done:true}", L.photoLog["2026-09-01"][P], { done: true });
+  check("a photo_id on an exercise entry is ignored", L.photoLog["2026-09-02"] && Object.keys(L.photoLog["2026-09-02"]), [P]);
+  check("fun-without-photo produces no row", L.photoLog["2026-09-03"], undefined);
+  check("photo day is a hit", dayResult(P, L.photoLog, "2026-09-01", pToday), HIT);
+  check("fun without a photo breaks the photo streak", dayResult(P, L.photoLog, "2026-09-03", pToday), MISS);
+  /* the invariant that would otherwise zero everyone's streak each morning */
+  check("today without a photo is pending, not a miss", dayResult(P, L.photoLog, pToday, pToday), PENDING);
+  check("photo streak survives an unphotographed today", currentStreak(P, L.photoLog, pToday), 1);
+  check("photo best streak", bestStreak(P, L.photoLog, pToday), 2);
+  check("photo total", totalHits(P, L.photoLog, pToday), 3);
+  check("join clamp applies to photos too",
+    dayResult(P, L.photoLog, "2026-09-03", pToday, "2026-09-04"), NEUTRAL);
+  check("buildLogs handles no entries", buildLogs([]), { exLog: {}, funLog: {}, photoLog: {} });
+
+  /* ---- EXIF orientation ---- */
+  const jpegWithOrientation = (o, little) => {
+    const head = [0xff, 0xd8, 0xff, 0xe1, 0x00, 0x20, 0x45, 0x78, 0x69, 0x66, 0x00, 0x00];
+    const bo = little ? [0x49, 0x49] : [0x4d, 0x4d];
+    const u16 = (n) => (little ? [n & 0xff, n >> 8] : [n >> 8, n & 0xff]);
+    const u32 = (n) => (little ? [n & 0xff, (n >> 8) & 0xff, (n >> 16) & 0xff, n >>> 24]
+                               : [n >>> 24, (n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff]);
+    return new Uint8Array([
+      ...head, ...bo, ...u16(0x2a), ...u32(8),
+      ...u16(1),                                    /* one IFD entry */
+      ...u16(0x0112), ...u16(3), ...u32(1), ...u16(o), 0, 0,
+    ]);
+  };
+  for (const o of [1, 3, 6, 8]) {
+    check(`exif orientation ${o} little-endian`, readExifOrientation(jpegWithOrientation(o, true)), o);
+    check(`exif orientation ${o} big-endian`, readExifOrientation(jpegWithOrientation(o, false)), o);
+  }
+  check("orientation 0 is out of range", readExifOrientation(jpegWithOrientation(0, true)), 1);
+  check("orientation 9 is out of range", readExifOrientation(jpegWithOrientation(9, true)), 1);
+  check("not a jpeg", readExifOrientation(new Uint8Array([1, 2, 3, 4])), 1);
+  check("empty input", readExifOrientation(new Uint8Array([])), 1);
+  check("null input", readExifOrientation(null), 1);
+  check("truncated mid-IFD doesn't throw", readExifOrientation(jpegWithOrientation(6, true).slice(0, 26)), 1);
+  check("jpeg with no exif", readExifOrientation(new Uint8Array([0xff, 0xd8, 0xff, 0xda, 0, 2])), 1);
+
+  /* ---- orientationTransform: the matrix must map the drawn rect onto the output box ---- */
+  for (let o = 1; o <= 8; o++) {
+    const { m, drawW, drawH } = orientationTransform(o, 100, 60);
+    const [a, b2, c, d, e, f] = m;
+    const corners = [[0, 0], [drawW, 0], [drawW, drawH], [0, drawH]]
+      .map(([x, y]) => [Math.round(a * x + c * y + e), Math.round(b2 * x + d * y + f)]);
+    const got = corners.map(p => p.join(",")).sort().join(" ");
+    const want = [[0, 0], [100, 0], [100, 60], [0, 60]].map(p => p.join(",")).sort().join(" ");
+    check(`orientation ${o} maps onto the output box`, got, want);
+  }
+  check("orientations 5-8 swap the draw rect", orientationTransform(6, 100, 60).drawW, 60);
+  check("orientations 1-4 don't swap", orientationTransform(3, 100, 60).drawW, 100);
+
+  /* ---- fitDimensions ---- */
+  check("landscape downscale", fitDimensions(4032, 3024, 1200), { w: 1200, h: 900 });
+  check("portrait downscale", fitDimensions(3024, 4032, 1200), { w: 900, h: 1200 });
+  check("never upscales", fitDimensions(800, 600, 1200), { w: 800, h: 600 });
+  check("square", fitDimensions(2000, 2000, 1200), { w: 1200, h: 1200 });
+  check("zero guard", fitDimensions(0, 500, 1200), { w: 0, h: 0 });
+
+  /* ---- galleryItems ---- */
+  const gUsers = [{ id: "u1", name: "Ana", emoji: "🐙" }, { id: "u2", name: "Bo", emoji: "🦊" }];
+  const gEntries = [
+    { user_id: "u1", date: "2026-09-01", kind: "fun", done: true, photo_id: "a", activity: "Baked" },
+    { user_id: "u2", date: "2026-09-02", kind: "fun", done: true, photo_id: "b", activity: "" },
+    { user_id: "u1", date: "2026-09-02", kind: "fun", done: true, photo_id: "c", activity: "" },
+    { user_id: "u1", date: "2026-09-03", kind: "fun", done: true, photo_id: null },
+    { user_id: "u1", date: "2026-09-03", kind: "exercise", done: true, photo_id: "x" },
+    { user_id: "ghost", date: "2026-09-04", kind: "fun", done: true, photo_id: "d" },
+  ];
+  const gi = galleryItems(gEntries, gUsers);
+  check("gallery keeps only fun entries with photos", gi.map(i => i.photoId), ["c", "b", "a"]);
+  check("gallery sorts newest day first, then by name", gi.map(i => `${i.date} ${i.name}`),
+    ["2026-09-02 Ana", "2026-09-02 Bo", "2026-09-01 Ana"]);
+  check("gallery joins the user", gi[2].emoji, "🐙");
+  check("gallery drops entries whose user is missing", gi.some(i => i.userId === "ghost"), false);
+  check("gallery handles empty input", galleryItems([], []), []);
 
   console.log(`${pass} passed, ${fail} failed`);
   return { pass, fail };

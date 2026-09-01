@@ -43,7 +43,19 @@ export const api = {
   changePin: (currentPin, newPin) => post("/api/pin", { currentPin, newPin }),
   saveEntry: (entry) => post("/api/log", entry),
   addFunIdea: (text) => post("/api/fun-ideas", { text }),
+  uploadPhoto: (photo) => post("/api/photo", photo),
+  deletePhoto: (date) => request(`/api/photo?date=${encodeURIComponent(date)}`, { method: "DELETE" }),
 };
+
+/* Photo bytes come back as a blob, not JSON, and the passcode travels in a
+   header — so the image can't be a plain <img src> and needs this fetch. */
+export async function fetchPhotoBlob(id) {
+  const res = await fetch(`/api/photo?id=${encodeURIComponent(id)}`, {
+    headers: { "x-passcode": getPasscode(), "x-user-token": getToken() },
+  });
+  if (!res.ok) throw new ApiError(res.status, {});
+  return res.blob();
+}
 
 /* 401 means two different things: the board passcode is wrong, or this
    device's session is no longer valid. They need different recoveries. */

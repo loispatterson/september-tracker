@@ -36,3 +36,21 @@ CREATE TABLE IF NOT EXISTS sessions (
   user_id    text NOT NULL REFERENCES users(id),
   created_at timestamptz DEFAULT now()
 );
+
+-- one photo per fun day. Bytes live here and never in the board payload.
+-- id is regenerated on every upload, including replacements, so a cached
+-- photo URL can never go stale and responses can be cached forever.
+CREATE TABLE IF NOT EXISTS entry_photos (
+  id         text PRIMARY KEY,
+  user_id    text NOT NULL,
+  date       text NOT NULL,
+  kind       text NOT NULL DEFAULT 'fun' CHECK (kind = 'fun'),
+  mime       text NOT NULL DEFAULT 'image/jpeg',
+  width      int,
+  height     int,
+  bytes      int,
+  data       bytea NOT NULL,
+  created_at timestamptz DEFAULT now(),
+  UNIQUE (user_id, date, kind),
+  FOREIGN KEY (user_id, date, kind) REFERENCES entries (user_id, date, kind) ON DELETE CASCADE
+);

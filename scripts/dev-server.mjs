@@ -11,6 +11,7 @@ import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 /* same PIN/token rules as production, imported rather than reimplemented */
 import { hashPin, verifyPin, validPin, newToken, MAX_FAILS, LOCKOUT_MINUTES } from "../api/_lib/auth.js";
+import { validatePhoto, newPhotoId, stripDataUrl, b64Bytes } from "../api/_lib/photos.js";
 
 const ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..");
 const DATA = join(ROOT, "scripts", ".local-data.json");
@@ -22,7 +23,7 @@ const GOALS = ["strength", "cardio", "mobility", "general"];
 const TYPES = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".json": "application/json" };
 
 async function db() {
-  if (!existsSync(DATA)) return { users: [], entries: [], funIdeas: [], nextIdea: 1, sessions: {} };
+  if (!existsSync(DATA)) return { users: [], entries: [], funIdeas: [], nextIdea: 1, sessions: {}, photos: {} };
   return JSON.parse(await readFile(DATA, "utf8"));
 }
 const put = (d) => writeFile(DATA, JSON.stringify(d, null, 2));
@@ -31,13 +32,20 @@ const send = (res, code, obj) => {
   res.end(JSON.stringify(obj));
 };
 
+const MAX_BODY = 6_000_000;   /* mirrors Vercel's 4.5 MB cap, with headroom */
+
 async function body(req) {
   const chunks = [];
-  for await (const c of req) chunks.push(c);
+  let size = 0;
+  for await (const c of req) {
+    size += c.length;
+    if (size > MAX_BODY) { req.destroy(); return {}; }
+    chunks.push(c);
+  }
   try { return JSON.parse(Buffer.concat(chunks).toString() || "{}"); } catch { return {}; }
 }
 
-async function apiRoute(req, res, path) {
+async function apiRoute(req, res, path, q) {
   /* set FAIL_API=1 to exercise the app's "can't reach the board" state */
   if (process.env.FAIL_API) return send(res, 503, { error: "database not configured" });
   const given = req.headers["x-passcode"];
@@ -47,6 +55,7 @@ async function apiRoute(req, res, path) {
   }
   const d = await db();
   d.sessions = d.sessions || {};
+  d.photos = d.photos || {};
 
   /* identity from the session token, mirroring api/_lib/db.js */
   const token = req.headers["x-user-token"];
@@ -57,9 +66,63 @@ async function apiRoute(req, res, path) {
     return send(res, 200, {
       users: d.users.map(({ pin_hash, pin_fails, pin_locked_until, ...u }) =>
         ({ ...u, has_pin: !!pin_hash })),
-      entries: d.entries.filter(e => e.date >= "2026-09-01" && e.date <= "2026-09-30"),
+      /* photo_id only, never the bytes — see api/board.js */
+      entries: d.entries
+        .filter(e => e.date >= "2026-09-01" && e.date <= "2026-09-30")
+        .map(e => ({
+          ...e,
+          photo_id: e.kind === "fun" ? (d.photos[e.user_id + "|" + e.date] || {}).id || null : null,
+        })),
       funIdeas: d.funIdeas,
     });
+  }
+
+  if (path === "/api/photo" && req.method === "GET") {
+    const id = q.get("id") || "";
+    const hit = Object.values(d.photos).find(p => p.id === id);
+    if (!hit) return send(res, 404, { error: "not found" });
+    const etag = `"${id}"`;
+    if (req.headers["if-none-match"] === etag) {
+      res.writeHead(304, { etag });
+      return res.end();
+    }
+    const buf = Buffer.from(hit.b64, "base64");
+    res.writeHead(200, {
+      "content-type": hit.mime,
+      "content-length": buf.length,
+      "cache-control": "private, max-age=31536000, immutable",
+      etag,
+    });
+    return res.end(buf);
+  }
+
+  if (path === "/api/photo" && req.method === "POST") {
+    if (!userId) return needAuth();
+    const payload = await body(req);
+    const { date, mime, w, h, activity } = payload;
+    const b64 = stripDataUrl(payload.b64);
+    const problem = validatePhoto({ date, mime, b64 });
+    if (problem) return send(res, problem.status, { error: problem.error });
+
+    /* the photo needs a fun entry to hang off, but must never overwrite one */
+    if (!d.entries.some(e => e.user_id === userId && e.date === date && e.kind === "fun")) {
+      d.entries.push({ user_id: userId, date, kind: "fun", done: true,
+        activity: activity ? String(activity).slice(0, 200) : "Photo", note: null });
+    }
+    const id = newPhotoId();
+    d.photos[userId + "|" + date] = { id, mime, b64, w: Number(w) || null,
+      h: Number(h) || null, bytes: b64Bytes(b64), created_at: new Date().toISOString() };
+    await put(d);
+    return send(res, 200, { photoId: id, bytes: b64Bytes(b64) });
+  }
+
+  if (path === "/api/photo" && req.method === "DELETE") {
+    if (!userId) return needAuth();
+    const date = q.get("date") || "";
+    if (!date) return send(res, 400, { error: "date required" });
+    delete d.photos[userId + "|" + date];
+    await put(d);
+    return send(res, 200, { ok: true });
   }
 
   if (path === "/api/users" && req.method === "POST") {
@@ -147,6 +210,10 @@ async function apiRoute(req, res, path) {
       return send(res, 400, { error: "date must be in September 2026" });
     if (kind !== "exercise" && kind !== "fun") return send(res, 400, { error: "bad kind" });
     d.entries = d.entries.filter(e => !(e.user_id === userId && e.date === date && e.kind === kind));
+    /* Production has ON DELETE CASCADE on entry_photos; there are no foreign
+       keys here, so the cascade has to be written by hand or un-logging a fun
+       day would behave differently locally than in production. */
+    if (done === null && kind === "fun") delete d.photos[userId + "|" + date];
     if (done !== null) {
       d.entries.push({ user_id: userId, date, kind, done: !!done,
         activity: activity ? String(activity).slice(0, 200) : null,
@@ -170,8 +237,12 @@ async function apiRoute(req, res, path) {
 }
 
 createServer(async (req, res) => {
-  const path = new URL(req.url, "http://x").pathname;
-  if (path.startsWith("/api/")) return apiRoute(req, res, path).catch(e => send(res, 500, { error: String(e) }));
+  const url = new URL(req.url, "http://x");
+  const path = url.pathname;
+  if (path.startsWith("/api/")) {
+    return apiRoute(req, res, path, url.searchParams)
+      .catch(e => send(res, 500, { error: String(e) }));
+  }
 
   const rel = path === "/" ? "index.html" : normalize(path).replace(/^(\.\.[/\\])+/, "").slice(1);
   const file = join(ROOT, rel);

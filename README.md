@@ -2,7 +2,8 @@
 
 30 minutes of exercise **and** one fun thing, every day of September 2026 — for you and a few friends, on a shared board.
 
-- **Today** — log your 30 minutes (tap an activity, or take one of three workout suggestions tuned to your age band and goal), plus today's fun idea (swap it, or write your own).
+- **Today** — log your 30 minutes (tap an activity, or take one of three workout suggestions tuned to your age band and goal), plus today's fun idea (swap it, or write your own) and a photo of it if you want one.
+- **Photos** — everyone's fun photos as a grid; tap one to enlarge.
 - **Board** — everyone's 30-day grid, current/best streak and total. Green = exercise done, pink dot = fun done, red = missed, dashed = today, grey = not yet. Tap any cell to see what someone did; tap your own past cells to backfill.
 - **You** — edit your profile, add fun ideas to the shared pool, copy the invite link.
 
@@ -70,6 +71,8 @@ Design notes worth knowing:
 - **Fun ideas are dealt from a shuffled deck** unique to each person, so you get 30 different ideas and never the same one two days running. The idea's *text* is stored when you log it, so editing the pool later never rewrites history.
 - **Writes are last-write-wins** upserts keyed on `(user, date, kind)`; the UI updates optimistically and refetches the board after each save, on tab focus, and every 60s.
 - **PINs are stored salted and hashed** (PBKDF2-SHA256), never in plain text, and the board endpoint exposes only a `has_pin` boolean. Anyone who joined before PINs existed sets one on first login rather than staying claimable.
+- **Photos** are shrunk in the browser (about 1200px, ~100–200 KB) before upload and stored in Postgres. `/api/board` carries only a `photo_id`, never image bytes, because it is refetched every 60 seconds; the bytes come from `/api/photo?id=…`, which is cached forever since a new upload always gets a fresh id. Un-logging a fun day deletes its photo, so the app asks first.
+- **Three streaks**: exercise 🔥, fun 🎉 and photo 📸. A photo streak counts days in a row *with a photo*, so a fun day without one breaks it. All three come from the same pure functions in `js/streaks.js`.
 
 ### Phase 2: AI suggestions
 

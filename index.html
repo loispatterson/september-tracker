@@ -20,14 +20,21 @@
   <section id="view-onboard" class="hidden"></section>
   <section id="view-today" class="hidden"></section>
   <section id="view-board" class="hidden"></section>
+  <section id="view-gallery" class="hidden"></section>
   <section id="view-profile" class="hidden"></section>
 </main>
 
 <nav class="tabs hidden" id="tabs">
   <button data-action="tab" data-tab="today"><span class="ico">✅</span>Today</button>
   <button data-action="tab" data-tab="board"><span class="ico">📅</span>Board</button>
+  <button data-action="tab" data-tab="gallery"><span class="ico">📸</span>Photos</button>
   <button data-action="tab" data-tab="profile"><span class="ico">⚙️</span>You</button>
 </nav>
+
+<!-- Outside <main> on purpose: render() replaces the views' innerHTML on a
+     60s timer, which would detach this input while the photo picker is open. -->
+<input type="file" id="photo-input" accept="image/jpeg,image/png,image/webp" class="hidden">
+<div id="lightbox"></div>
 
 <div id="toast"></div>
 
