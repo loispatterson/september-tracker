@@ -37,6 +37,8 @@ const post = (path, body) => request(path, { method: "POST", body: JSON.stringif
 
 export const api = {
   getBoard: () => request("/api/board"),
+  getMe: () => request("/api/me"),
+  suggest: (date) => post("/api/suggest", { date }),
   createUser: (profile) => post("/api/users", profile),
   updateUser: (patch) => request("/api/users", { method: "PATCH", body: JSON.stringify(patch) }),
   claim: (userId, pin) => post("/api/claim", { userId, pin }),

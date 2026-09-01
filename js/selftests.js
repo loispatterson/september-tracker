@@ -4,6 +4,7 @@
 import { addDays, prettyDate, septDates, septDayNum, SEPT_START, SEPT_END } from "./dates.js";
 import { currentStreak, bestStreak, totalHits, dayResult, HIT, MISS, PENDING, NEUTRAL } from "./streaks.js";
 import { pickWorkouts, hashStr } from "./suggestions.js";
+import { expandAgeBand } from "./profile.js";
 import { WORKOUTS } from "./data/workouts.js";
 import { funPromptFor, funPool } from "./fun.js";
 import { buildLogs } from "./logs.js";
@@ -64,27 +65,50 @@ export function runSelfTests() {
   check("joiner's total ignores pre-join days", totalHits(W, lateLog, today, joined), 1);
 
   /* ---- suggestions ---- */
-  const prof = { id: U, ageBand: "60plus", goal: "strength" };
+  const prof = { id: U, ageBand: "45-49", goals: ["weightloss", "strength"], fitness: "occasional" };
   const picks = pickWorkouts(prof, "2026-09-01", [], WORKOUTS);
   check("always 3 suggestions", picks.length, 3);
-  check("respects age band", picks.every(w => w.ageBands.includes("60plus")), true);
-  check("respects goal (or general)", picks.every(w => w.goal === "strength" || w.goal === "general"), true);
+  check("respects age band", picks.every(w => w.ageBands.includes("45-49")), true);
+  check("serves at least one stated goal",
+    picks.every(w => w.goals.some(g => prof.goals.includes(g))), true);
+  check("respects fitness level (no high intensity for occasional)",
+    picks.every(w => w.intensity !== "high"), true);
   check("deterministic for same date",
     pickWorkouts(prof, "2026-09-01", [], WORKOUTS).map(w => w.id), picks.map(w => w.id));
-  /* Offsets are hash-derived, so adjacent days may occasionally coincide;
-     what matters is plenty of variety across the month. */
   const sets = new Set(septDates().map(ds => pickWorkouts(prof, ds, [], WORKOUTS).map(w => w.id).join(",")));
-  check("varies across the month (smallest pool)", sets.size >= 5, true);
-  const young = { id: U, ageBand: "under30", goal: "cardio" };
-  check("high intensity available to under30",
-    WORKOUTS.some(w => w.intensity === "high" && w.ageBands.includes("under30")), true);
-  check("no high intensity for 60plus",
-    WORKOUTS.filter(w => w.ageBands.includes("60plus")).every(w => w.intensity !== "high"), true);
-  const demoted = pickWorkouts(young, "2026-09-03", ["steady 30-min run"], WORKOUTS);
-  check("demotes yesterday's activity",
-    demoted[0].title.toLowerCase() !== "steady 30-min run", true);
-  check("every goal has picks", ["strength", "cardio", "mobility", "general"].every(g =>
-    pickWorkouts({ id: U, ageBand: "30-44", goal: g }, "2026-09-07", [], WORKOUTS).length === 3), true);
+  check("varies across the month", sets.size >= 5, true);
+
+  /* multi-goal: a workout serving both goals should outrank one serving either */
+  const both = pickWorkouts({ ...prof, fitness: "regular" }, "2026-09-02", [], WORKOUTS);
+  const scoreOf = w => w.goals.filter(g => prof.goals.includes(g)).length;
+  check("best goal match comes first", scoreOf(both[0]) >= scoreOf(both[2]), true);
+
+  check("weight-loss goal has real options",
+    WORKOUTS.filter(w => w.goals.includes("weightloss")).length >= 8, true);
+  check("very active people are not offered only gentle work",
+    pickWorkouts({ id: U, ageBand: "30-34", goals: ["cardio"], fitness: "veryactive" },
+      "2026-09-03", [], WORKOUTS).every(w => w.intensity !== "low"), true);
+  check("beginners are never given high intensity",
+    pickWorkouts({ id: U, ageBand: "30-34", goals: ["strength"], fitness: "starting" },
+      "2026-09-03", [], WORKOUTS).every(w => w.intensity !== "high"), true);
+  check("older bands never get high intensity in the library",
+    WORKOUTS.filter(w => w.ageBands.includes("65plus")).every(w => w.intensity !== "high"), true);
+  check("every goal yields 3 picks", ["weightloss", "strength", "cardio", "mobility", "general"].every(g =>
+    pickWorkouts({ id: U, ageBand: "40-44", goals: [g], fitness: "regular" }, "2026-09-07", [], WORKOUTS).length === 3), true);
+  const demoted = pickWorkouts({ id: U, ageBand: "30-34", goals: ["cardio"], fitness: "regular" },
+    "2026-09-03", ["steady 30-min run"], WORKOUTS);
+  check("demotes what you just did", demoted[0].title.toLowerCase() !== "steady 30-min run", true);
+
+  /* legacy accounts keep working until their owner re-picks a finer band */
+  check("legacy band widens", expandAgeBand("45-59"), ["45-49", "50-54", "55-59"]);
+  check("new band passes through", expandAgeBand("50-54"), ["50-54"]);
+  check("unknown band is empty", expandAgeBand("nope"), []);
+  check("legacy profile still gets suggestions",
+    pickWorkouts({ id: U, ageBand: "45-59", goals: ["strength"], fitness: "regular" },
+      "2026-09-04", [], WORKOUTS).length, 3);
+  check("a profile with no goals still gets suggestions",
+    pickWorkouts({ id: U, ageBand: "40-44", goals: [], fitness: "regular" },
+      "2026-09-05", [], WORKOUTS).length, 3);
 
   /* ---- fun prompts ---- */
   check("pool includes curated + db", funPool([{ text: "x" }]).length, 31);

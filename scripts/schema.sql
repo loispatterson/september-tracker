@@ -12,6 +12,13 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_hash text;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_fails int NOT NULL DEFAULT 0;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_locked_until timestamptz;
 
+-- Fitness profile. Private: only its owner ever reads it, via /api/me.
+-- goals is a list because "lose weight AND get stronger" is one person.
+-- note is free text for the things a tick-box can't hold: a bad knee, no gym.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS goals text;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS fitness text;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS note text;
+
 CREATE TABLE IF NOT EXISTS entries (
   user_id    text NOT NULL REFERENCES users(id),
   date       text NOT NULL,              -- 'YYYY-MM-DD', lexically comparable

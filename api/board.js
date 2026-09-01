@@ -5,7 +5,10 @@ export default endpoint(async (req, res) => {
   if (req.method !== "GET") return res.status(405).json({ error: "method" });
 
   const [users, entries, funIdeas] = await Promise.all([
-    sql`SELECT id, name, emoji, age_band, goal,
+    /* Name and avatar only. Age band, goals, fitness level and notes are
+       private to their owner and come back from /api/me instead — the board
+       is shared with everyone who has the passcode. */
+    sql`SELECT id, name, emoji,
                to_char(created_at, 'YYYY-MM-DD') AS joined,
                pin_hash IS NOT NULL AS has_pin
         FROM users ORDER BY created_at`,

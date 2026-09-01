@@ -1,25 +1,28 @@
 import { sql, endpoint, bad } from "./_lib/db.js";
 import { hashPin, newToken, validPin } from "./_lib/auth.js";
+import { validAgeBand, cleanGoals, cleanNote, FITNESS, GOALS } from "./_lib/profile.js";
 
-const AGE_BANDS = ["under30", "30-44", "45-59", "60plus"];
-const GOALS = ["strength", "cardio", "mobility", "general"];
-
-/* POST { name, emoji, ageBand, goal, pin } → { id, token }   (409 if name taken)
-   PATCH { emoji?, ageBand?, goal? } → { ok }   (identity comes from the token) */
+/* POST { name, emoji, ageBand, goals[], fitness, note?, pin } → { id, token }
+   PATCH { emoji?, ageBand?, goals?, fitness?, note? } → { ok }
+   Identity on PATCH comes from the session token, never the body. */
 export default endpoint(async (req, res) => {
   if (req.method === "POST") {
-    const { name, emoji, ageBand, goal, pin } = req.body || {};
+    const { name, emoji, ageBand, fitness, note, pin } = req.body || {};
+    const goals = cleanGoals((req.body || {}).goals);
     const cleanName = String(name || "").trim().slice(0, 40);
+
     if (!cleanName) return bad(res, "name required");
-    if (!AGE_BANDS.includes(ageBand)) return bad(res, "bad ageBand");
-    if (!GOALS.includes(goal)) return bad(res, "bad goal");
+    if (!validAgeBand(ageBand)) return bad(res, "bad ageBand");
+    if (!goals.length) return bad(res, "pick at least one goal");
+    if (!FITNESS.includes(fitness)) return bad(res, "bad fitness level");
     if (!validPin(pin)) return bad(res, "PIN must be 4 digits");
 
     const id = "u_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     try {
-      await sql`INSERT INTO users (id, name, emoji, age_band, goal, pin_hash)
+      await sql`INSERT INTO users (id, name, emoji, age_band, goal, goals, fitness, note, pin_hash)
                 VALUES (${id}, ${cleanName}, ${String(emoji || "💪").slice(0, 8)},
-                        ${ageBand}, ${goal}, ${hashPin(pin)})`;
+                        ${ageBand}, ${goals[0]}, ${goals.join(",")}, ${fitness},
+                        ${cleanNote(note)}, ${hashPin(pin)})`;
     } catch (e) {
       if (String(e).includes("users_name_key")) return res.status(409).json({ error: "name taken" });
       throw e;
@@ -33,16 +36,24 @@ export default endpoint(async (req, res) => {
   res.status(405).json({ error: "method" });
 });
 
-/* PATCH needs a session; POST (signing up) cannot have one yet, so the auth
-   check lives on this branch rather than the whole endpoint. */
 const patch = endpoint(async (req, res, userId) => {
-  const { emoji, ageBand, goal } = req.body || {};
-  if (ageBand && !AGE_BANDS.includes(ageBand)) return bad(res, "bad ageBand");
-  if (goal && !GOALS.includes(goal)) return bad(res, "bad goal");
+  const { emoji, ageBand, fitness, note } = req.body || {};
+  const hasGoals = (req.body || {}).goals !== undefined;
+  const goals = hasGoals ? cleanGoals(req.body.goals) : null;
+
+  if (ageBand && !validAgeBand(ageBand)) return bad(res, "bad ageBand");
+  if (fitness && !FITNESS.includes(fitness)) return bad(res, "bad fitness level");
+  if (hasGoals && !goals.length) return bad(res, "pick at least one goal");
+
   await sql`UPDATE users SET
-              emoji = COALESCE(${emoji ? String(emoji).slice(0, 8) : null}, emoji),
+              emoji    = COALESCE(${emoji ? String(emoji).slice(0, 8) : null}, emoji),
               age_band = COALESCE(${ageBand || null}, age_band),
-              goal = COALESCE(${goal || null}, goal)
+              fitness  = COALESCE(${fitness || null}, fitness),
+              goals    = COALESCE(${goals ? goals.join(",") : null}, goals),
+              goal     = COALESCE(${goals ? goals[0] : null}, goal),
+              note     = COALESCE(${note === undefined ? null : cleanNote(note)}, note)
             WHERE id = ${userId}`;
   res.status(200).json({ ok: true });
 }, { auth: true });
+
+export { GOALS };

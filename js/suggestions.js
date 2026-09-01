@@ -1,4 +1,6 @@
 import { WORKOUTS } from "./data/workouts.js";
+import { expandAgeBand } from "./profile.js";
+import { api, isAuthError } from "./api.js";
 
 /* Deterministic string hash (FNV-1a + avalanche finalizer) for daily rotation.
    The finalizer matters: a plain multiply-and-add hash keeps structure — with a
@@ -16,32 +18,62 @@ export function hashStr(s) {
   return h >>> 0;
 }
 
-/* Pure rule engine: filter by goal + age band, rotate daily, demote yesterday's activity.
-   Always returns 3 suggestions (pads from the full library if filters run dry). */
+/* How hard a session may be for someone at each fitness level. */
+const ALLOWED_INTENSITY = {
+  starting: ["low", "med"],
+  occasional: ["low", "med"],
+  regular: ["low", "med", "high"],
+  veryactive: ["med", "high"],
+};
+
+/* Pure rule engine, and the fallback whenever the AI endpoint is unavailable.
+   Scores by how many of the person's goals a workout serves, filtered to their
+   age band and a sensible intensity for their fitness level. */
 export function pickWorkouts(profile, dateStr, recentActivities, library = WORKOUTS) {
+  const bands = expandAgeBand(profile.ageBand);
+  const goals = (profile.goals && profile.goals.length ? profile.goals : ["general"]);
+  const intensities = ALLOWED_INTENSITY[profile.fitness] || ["low", "med", "high"];
   const recent = (recentActivities || []).map(a => String(a).toLowerCase());
-  let pool = library.filter(w =>
-    (w.goal === profile.goal || w.goal === "general") &&
-    w.ageBands.includes(profile.ageBand)
-  );
-  if (pool.length < 3) {
-    const extras = library.filter(w => w.ageBands.includes(profile.ageBand) && !pool.includes(w));
-    pool = pool.concat(extras);
-  }
+
+  const fits = w => w.ageBands.some(b => bands.includes(b));
+  const score = w => goals.reduce((n, g) => n + (w.goals.includes(g) ? 1 : 0), 0);
+
+  let pool = library.filter(w => fits(w) && score(w) > 0 && intensities.includes(w.intensity));
+  /* Widen rather than return nothing: intensity first, then goals. */
+  if (pool.length < 3) pool = library.filter(w => fits(w) && score(w) > 0);
+  if (pool.length < 3) pool = library.filter(fits);
+  if (pool.length < 3) pool = library.slice();
+
   const offset = hashStr(dateStr + "|" + (profile.id || "")) % Math.max(pool.length, 1);
   const rotated = pool.slice(offset).concat(pool.slice(0, offset));
-  /* stable partition: anything resembling yesterday's activity goes to the back */
-  const fresh = [], stale = [];
-  for (const w of rotated) {
-    (recent.some(a => w.title.toLowerCase().includes(a)) ? stale : fresh).push(w);
-  }
-  return fresh.concat(stale).slice(0, 3);
+
+  /* Best goal-match first, then the daily rotation decides between equals;
+     anything resembling a recent session drops to the back. */
+  const ranked = rotated
+    .map((w, i) => ({ w, i, s: score(w), stale: recent.some(a => w.title.toLowerCase().includes(a)) }))
+    .sort((a, b) => (a.stale - b.stale) || (b.s - a.s) || (a.i - b.i))
+    .map(x => x.w);
+
+  return ranked.slice(0, 3);
 }
 
-/* ---- PHASE-2 SEAM ----
-   The UI only ever calls this. To upgrade to AI suggestions, change the body to
-   fetch('/api/suggest', ...) (serverless fn calling the Anthropic API) with the
-   same return shape, keeping pickWorkouts() as the offline/error fallback. */
+/* The only function the UI calls. Asks Claude for something written for this
+   person; falls back to the built-in library if that is unavailable, fails, or
+   is simply not configured — so suggestions always appear. */
+let aiConfigured = true;   /* until the server tells us otherwise */
+
 export async function getSuggestions(profile, dateStr, recentActivities) {
+  if (aiConfigured) {
+    try {
+      const { workouts } = await api.suggest(dateStr);
+      if (workouts && workouts.length === 3) return workouts;
+    } catch (e) {
+      if (isAuthError(e)) throw e;      /* signed out: let the caller handle it */
+      /* 503 means no API key is set up: a settled fact for this page load, so
+         stop asking rather than failing a request on every render. */
+      if (e.status === 503) aiConfigured = false;
+      console.info("Using the built-in workout library:", e.message);
+    }
+  }
   return pickWorkouts(profile, dateStr, recentActivities);
 }

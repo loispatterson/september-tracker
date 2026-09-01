@@ -4,14 +4,13 @@ import { todayStr, prettyDate, septDates, septDayNum, SEPT_START, SEPT_END, addD
 import { currentStreak, bestStreak, totalHits, dayResult, HIT, MISS, PENDING } from "./streaks.js";
 import { getSuggestions } from "./suggestions.js";
 import { funPromptFor } from "./fun.js";
+import { AGE_BANDS, GOALS, FITNESS, isLegacyBand } from "./profile.js";
 import { buildLogs } from "./logs.js";
 import { galleryItems } from "./imageutil.js";
 import { prepareUpload, blobToBase64, hydratePhotos, forgetPhoto, cachedUrl } from "./photos.js";
 
 const ME_KEY = "septTracker.me";
 const ACTIVITIES = ["Run", "Walk", "Gym", "Cycle", "Swim", "Yoga", "Class", "Other"];
-const AGE_BANDS = [["under30", "Under 30"], ["30-44", "30–44"], ["45-59", "45–59"], ["60plus", "60+"]];
-const GOALS = [["strength", "Strength"], ["cardio", "Cardio"], ["mobility", "Mobility"], ["general", "General fitness"]];
 const EMOJIS = ["💪", "🏃", "🚴", "🧘", "🏊", "⚡", "🔥", "🌟", "🐝", "🦊", "🐙", "🦕"];
 
 /* ---------- state ---------- */
@@ -27,7 +26,7 @@ const ui = {
   offline: false,                 /* board unreachable — show a real message */
   onboardStep: "who",             /* who | new | pin */
   claiming: null,                 /* user being claimed, awaiting their PIN */
-  draft: { name: "", emoji: "💪", ageBand: "", goal: "", pin: "" },
+  draft: { name: "", emoji: "💪", ageBand: "", goals: [], fitness: "", note: "", pin: "" },
   changingPin: false,
   showSuggestions: false,
   funSwap: 0,
@@ -56,9 +55,25 @@ function toast(msg) {
   toast._t = setTimeout(() => el.classList.remove("show"), 2200);
 }
 function getUser(id) { return board.users.find(u => u.id === id); }
+/* The private half of your own profile, from /api/me — the board deliberately
+   doesn't carry age, goals, fitness level or notes for anyone. */
+let myPrivate = null;
 function myProfile() {
   const u = me && getUser(me.id);
-  return u ? { id: u.id, name: u.name, emoji: u.emoji, ageBand: u.age_band, goal: u.goal } : null;
+  if (!u) return null;
+  return {
+    id: u.id, name: u.name, emoji: u.emoji,
+    ageBand: myPrivate ? myPrivate.ageBand : "",
+    goals: myPrivate ? myPrivate.goals : [],
+    fitness: myPrivate ? myPrivate.fitness : "",
+    note: myPrivate ? myPrivate.note : "",
+  };
+}
+
+async function loadMyProfile() {
+  if (!me) { myPrivate = null; return; }
+  try { myPrivate = await api.getMe(); }
+  catch (e) { if (isAuthError(e)) return signedOut(); myPrivate = null; }
 }
 function entryFor(log, ds, userId) { return (log[ds] && log[ds][userId]) || null; }
 
@@ -151,9 +166,20 @@ function renderOnboard() {
           `<button class="chip ${d.ageBand === v ? "on" : ""}" data-action="draft" data-key="ageBand" data-val="${v}">${l}</button>`).join("")}</div>
       </div>
       <div class="field">
-        <label>Main goal</label>
+        <label>Current fitness <span class="muted">(be honest, it only tunes suggestions)</span></label>
+        <div class="chips">${FITNESS.map(([v, l]) =>
+          `<button class="chip ${d.fitness === v ? "on" : ""}" data-action="draft" data-key="fitness" data-val="${v}">${l}</button>`).join("")}</div>
+      </div>
+      <div class="field">
+        <label>Goals <span class="muted">(pick as many as you like)</span></label>
         <div class="chips">${GOALS.map(([v, l]) =>
-          `<button class="chip ${d.goal === v ? "on" : ""}" data-action="draft" data-key="goal" data-val="${v}">${l}</button>`).join("")}</div>
+          `<button class="chip ${(d.goals || []).includes(v) ? "on" : ""}" data-action="draft-goal" data-val="${v}">${l}</button>`).join("")}</div>
+      </div>
+      <div class="field">
+        <label>Anything else? <span class="muted">(optional)</span></label>
+        <input type="text" id="note-input" value="${esc(d.note || "")}"
+               placeholder="e.g. dodgy knee, no gym, back after time off" autocomplete="off">
+        <p class="small muted">Only you can see this. It's used to tailor your workout suggestions.</p>
       </div>
       <div class="field">
         <label>Choose a 4-digit PIN <span class="muted">(so only you can log as you)</span></label>
@@ -498,15 +524,32 @@ function renderProfile() {
         <div class="chips">${EMOJIS.map(e =>
           `<button class="chip ${p.emoji === e ? "on" : ""}" data-action="set-profile" data-key="emoji" data-val="${e}">${e}</button>`).join("")}</div>
       </div>
+      <p class="small muted">Everything below is private to you. Other people
+        only ever see your name and avatar.</p>
       <div class="field">
         <label>Age band</label>
+        ${isLegacyBand(p.ageBand) ? `<p class="small muted">Your band was set before
+          the finer ranges existed — pick the closer one.</p>` : ""}
         <div class="chips">${AGE_BANDS.map(([v, l]) =>
           `<button class="chip ${p.ageBand === v ? "on" : ""}" data-action="set-profile" data-key="ageBand" data-val="${v}">${l}</button>`).join("")}</div>
       </div>
       <div class="field">
-        <label>Main goal</label>
+        <label>Current fitness</label>
+        <div class="chips">${FITNESS.map(([v, l]) =>
+          `<button class="chip ${p.fitness === v ? "on" : ""}" data-action="set-profile" data-key="fitness" data-val="${v}">${l}</button>`).join("")}</div>
+      </div>
+      <div class="field">
+        <label>Goals <span class="muted">(pick as many as you like)</span></label>
         <div class="chips">${GOALS.map(([v, l]) =>
-          `<button class="chip ${p.goal === v ? "on" : ""}" data-action="set-profile" data-key="goal" data-val="${v}">${l}</button>`).join("")}</div>
+          `<button class="chip ${(p.goals || []).includes(v) ? "on" : ""}" data-action="set-goal" data-val="${v}">${l}</button>`).join("")}</div>
+      </div>
+      <div class="field">
+        <label>Anything else? <span class="muted">(injuries, equipment, circumstances)</span></label>
+        <input type="text" id="profile-note" value="${esc(p.note || "")}"
+               placeholder="e.g. dodgy knee, no gym" autocomplete="off">
+        <div class="actions">
+          <button class="btn" data-action="save-note">Save</button>
+        </div>
       </div>
     </div>
     <div class="card">
@@ -708,12 +751,20 @@ async function onClick(ev) {
     return;
   }
 
-  if (a === "draft") {
-    const nameEl = document.getElementById("name-input");
-    if (nameEl) ui.draft.name = nameEl.value;
-    const pinEl = document.getElementById("pin-input");
-    if (pinEl) ui.draft.pin = pinEl.value;
-    ui.draft[el.dataset.key] = el.dataset.val;
+  if (a === "draft" || a === "draft-goal") {
+    /* Keep whatever's typed: a chip tap re-renders the whole form. */
+    for (const [id, key] of [["name-input", "name"], ["pin-input", "pin"], ["note-input", "note"]]) {
+      const elx = document.getElementById(id);
+      if (elx) ui.draft[key] = elx.value;
+    }
+    if (a === "draft-goal") {
+      const g = el.dataset.val;
+      const set = new Set(ui.draft.goals || []);
+      set.has(g) ? set.delete(g) : set.add(g);
+      ui.draft.goals = [...set];
+    } else {
+      ui.draft[el.dataset.key] = el.dataset.val;
+    }
     render();
     return;
   }
@@ -722,9 +773,11 @@ async function onClick(ev) {
     const d = ui.draft;
     d.name = (document.getElementById("name-input").value || "").trim();
     d.pin = (document.getElementById("pin-input").value || "").trim();
+    d.note = (document.getElementById("note-input").value || "").trim();
     if (!d.name) return toast("Add your name first");
     if (!d.ageBand) return toast("Pick an age band");
-    if (!d.goal) return toast("Pick a goal");
+    if (!d.fitness) return toast("Pick your current fitness level");
+    if (!(d.goals || []).length) return toast("Pick at least one goal");
     if (!/^\d{4}$/.test(d.pin)) return toast("Choose a 4-digit PIN");
     try {
       const { id, token } = await api.createUser(d);
@@ -733,6 +786,7 @@ async function onClick(ev) {
       localStorage.setItem(ME_KEY, JSON.stringify(me));
       ui.draft.pin = "";
       await refresh();
+      await loadMyProfile();
       await loadSuggestions();
       toast("You're in — welcome!");
       render();
@@ -761,6 +815,7 @@ async function onClick(ev) {
       ui.claiming = null;
       ui.onboardStep = "who";
       await refresh();
+      await loadMyProfile();
       await loadSuggestions();
       render();
     } catch (e) {
@@ -832,15 +887,36 @@ async function onClick(ev) {
     return;
   }
 
-  if (a === "set-profile") {
-    const patch = { [el.dataset.key]: el.dataset.val };
-    const u = getUser(me.id);
-    if (el.dataset.key === "emoji") u.emoji = el.dataset.val;
-    if (el.dataset.key === "ageBand") u.age_band = el.dataset.val;
-    if (el.dataset.key === "goal") u.goal = el.dataset.val;
+  if (a === "set-profile" || a === "set-goal" || a === "save-note") {
+    const patch = {};
+    if (a === "set-goal") {
+      const set = new Set((myPrivate && myPrivate.goals) || []);
+      set.has(el.dataset.val) ? set.delete(el.dataset.val) : set.add(el.dataset.val);
+      if (!set.size) return toast("Keep at least one goal");
+      patch.goals = [...set];
+    } else if (a === "save-note") {
+      patch.note = (document.getElementById("profile-note").value || "").trim();
+    } else {
+      patch[el.dataset.key] = el.dataset.val;
+    }
+
+    /* Optimistic: emoji lives on the shared board, the rest is private. */
+    if (patch.emoji) getUser(me.id).emoji = patch.emoji;
+    if (myPrivate) Object.assign(myPrivate, patch);
     render();
-    try { await api.updateUser(patch); await loadSuggestions(); }
-    catch (e) { if (isAuthError(e)) return signedOut(); toast("Couldn't save profile"); }
+
+    try {
+      await api.updateUser(patch);
+      await loadMyProfile();
+      await loadSuggestions();
+      if (a === "save-note") toast("Saved");
+      render();
+    } catch (e) {
+      if (isAuthError(e)) return signedOut();
+      toast(errorMessage(e) || "Couldn't save profile");
+      await loadMyProfile();
+      render();
+    }
     return;
   }
 
@@ -923,7 +999,7 @@ async function boot() {
   document.getElementById("photo-input").addEventListener("change", onPhotoPicked);
   render();
   await refresh();
-  if (me && getUser(me.id)) await loadSuggestions();
+  if (me && getUser(me.id)) { await loadMyProfile(); await loadSuggestions(); }
   render();
 
   /* cheap multiplayer: refetch when the tab regains focus and every 60s */

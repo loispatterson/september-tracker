@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 /* same PIN/token rules as production, imported rather than reimplemented */
 import { hashPin, verifyPin, validPin, newToken, MAX_FAILS, LOCKOUT_MINUTES } from "../api/_lib/auth.js";
 import { validatePhoto, newPhotoId, stripDataUrl, b64Bytes } from "../api/_lib/photos.js";
+import { validAgeBand, cleanGoals, cleanNote, FITNESS } from "../api/_lib/profile.js";
 
 const ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..");
 const DATA = join(ROOT, "scripts", ".local-data.json");
@@ -64,8 +65,11 @@ async function apiRoute(req, res, path, q) {
 
   if (path === "/api/board" && req.method === "GET") {
     return send(res, 200, {
-      users: d.users.map(({ pin_hash, pin_fails, pin_locked_until, ...u }) =>
-        ({ ...u, has_pin: !!pin_hash })),
+      /* name + avatar only — profile fields are private, see /api/me */
+      users: d.users.map(u => ({
+        id: u.id, name: u.name, emoji: u.emoji, joined: u.joined,
+        has_pin: !!u.pin_hash,
+      })),
       /* photo_id only, never the bytes — see api/board.js */
       entries: d.entries
         .filter(e => e.date >= "2026-09-01" && e.date <= "2026-09-30")
@@ -126,18 +130,23 @@ async function apiRoute(req, res, path, q) {
   }
 
   if (path === "/api/users" && req.method === "POST") {
-    const { name, emoji, ageBand, goal, pin } = await body(req);
+    const payload = await body(req);
+    const { name, emoji, ageBand, fitness, note, pin } = payload;
+    const goals = cleanGoals(payload.goals);
     const cleanName = String(name || "").trim().slice(0, 40);
     if (!cleanName) return send(res, 400, { error: "name required" });
-    if (!AGE_BANDS.includes(ageBand)) return send(res, 400, { error: "bad ageBand" });
-    if (!GOALS.includes(goal)) return send(res, 400, { error: "bad goal" });
+    if (!validAgeBand(ageBand)) return send(res, 400, { error: "bad ageBand" });
+    if (!goals.length) return send(res, 400, { error: "pick at least one goal" });
+    if (!FITNESS.includes(fitness)) return send(res, 400, { error: "bad fitness level" });
     if (!validPin(pin)) return send(res, 400, { error: "PIN must be 4 digits" });
     if (d.users.some(u => u.name === cleanName)) return send(res, 409, { error: "name taken" });
     const id = "u_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     const now = new Date();
     const joined = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
     d.users.push({ id, name: cleanName, emoji: String(emoji || "💪").slice(0, 8),
-                   age_band: ageBand, goal, joined, pin_hash: hashPin(pin), pin_fails: 0, pin_locked_until: null });
+                   age_band: ageBand, goal: goals[0], goals: goals.join(","),
+                   fitness, note: cleanNote(note), joined,
+                   pin_hash: hashPin(pin), pin_fails: 0, pin_locked_until: null });
     const t = newToken();
     d.sessions[t] = id;
     await put(d);
@@ -191,16 +200,48 @@ async function apiRoute(req, res, path, q) {
     return send(res, 200, { ok: true });
   }
 
+  if (path === "/api/me" && req.method === "GET") {
+    if (!userId) return needAuth();
+    const u = d.users.find(x => x.id === userId);
+    if (!u) return send(res, 404, { error: "no such person" });
+    return send(res, 200, {
+      id: u.id, name: u.name, emoji: u.emoji, ageBand: u.age_band,
+      goals: u.goals ? u.goals.split(",").filter(Boolean) : (u.goal ? [u.goal] : []),
+      fitness: u.fitness || "", note: u.note || "",
+    });
+  }
+
   if (path === "/api/users" && req.method === "PATCH") {
     if (!userId) return needAuth();
-    const { emoji, ageBand, goal } = await body(req);
+    const payload = await body(req);
+    const { emoji, ageBand, fitness, note } = payload;
     const u = d.users.find(x => x.id === userId);
     if (!u) return send(res, 400, { error: "unknown user" });
     if (emoji) u.emoji = String(emoji).slice(0, 8);
-    if (ageBand) { if (!AGE_BANDS.includes(ageBand)) return send(res, 400, { error: "bad ageBand" }); u.age_band = ageBand; }
-    if (goal) { if (!GOALS.includes(goal)) return send(res, 400, { error: "bad goal" }); u.goal = goal; }
+    if (ageBand) {
+      if (!validAgeBand(ageBand)) return send(res, 400, { error: "bad ageBand" });
+      u.age_band = ageBand;
+    }
+    if (fitness) {
+      if (!FITNESS.includes(fitness)) return send(res, 400, { error: "bad fitness level" });
+      u.fitness = fitness;
+    }
+    if (payload.goals !== undefined) {
+      const goals = cleanGoals(payload.goals);
+      if (!goals.length) return send(res, 400, { error: "pick at least one goal" });
+      u.goals = goals.join(","); u.goal = goals[0];
+    }
+    if (note !== undefined) u.note = cleanNote(note);
     await put(d);
     return send(res, 200, { ok: true });
+  }
+
+  /* The AI endpoint needs a real API key, so locally it always declines and
+     the client falls back to its built-in library — same as production
+     without ANTHROPIC_API_KEY. */
+  if (path === "/api/suggest" && req.method === "POST") {
+    if (!userId) return needAuth();
+    return send(res, 503, { error: "ai suggestions not configured" });
   }
 
   if (path === "/api/log" && req.method === "POST") {
