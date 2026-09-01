@@ -76,7 +76,19 @@ export function runSelfTests() {
   check("deterministic for same date",
     pickWorkouts(prof, "2026-09-01", [], WORKOUTS).map(w => w.id), picks.map(w => w.id));
   const sets = new Set(septDates().map(ds => pickWorkouts(prof, ds, [], WORKOUTS).map(w => w.id).join(",")));
-  check("varies across the month", sets.size >= 5, true);
+  check("varies across the month", sets.size >= 10, true);
+  /* Ranking strictly by goal match pinned the same top three to every day and
+     handed identical lists to different people; weighting instead fixed it. */
+  check("consecutive days usually differ",
+    septDates().slice(0, 10).filter((ds, i, a) =>
+      i > 0 && pickWorkouts(prof, ds, [], WORKOUTS).map(w => w.id).join() ===
+               pickWorkouts(prof, a[i - 1], [], WORKOUTS).map(w => w.id).join()).length <= 3, true);
+  check("two people with the same profile get different picks",
+    pickWorkouts({ ...prof, id: "u_twin" }, "2026-09-03", [], WORKOUTS).map(w => w.id).join() !==
+    pickWorkouts(prof, "2026-09-03", [], WORKOUTS).map(w => w.id).join(), true);
+  check("every pick all month still serves a stated goal",
+    septDates().every(ds => pickWorkouts(prof, ds, [], WORKOUTS)
+      .every(w => w.goals.some(g => prof.goals.includes(g)))), true);
 
   /* multi-goal: a workout serving both goals should outrank one serving either */
   const both = pickWorkouts({ ...prof, fitness: "regular" }, "2026-09-02", [], WORKOUTS);

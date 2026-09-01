@@ -44,17 +44,24 @@ export function pickWorkouts(profile, dateStr, recentActivities, library = WORKO
   if (pool.length < 3) pool = library.filter(fits);
   if (pool.length < 3) pool = library.slice();
 
-  const offset = hashStr(dateStr + "|" + (profile.id || "")) % Math.max(pool.length, 1);
-  const rotated = pool.slice(offset).concat(pool.slice(0, offset));
+  /* Weight by goal match rather than sorting by it: a workout serving two of
+     your goals gets two tickets, one goal gets one. Rotating this weighted
+     list means better matches come up more often while the day still decides
+     which you actually see — sorting by score instead pinned the same top
+     three to every day, and gave identical lists to different people. */
+  const tickets = [];
+  for (const w of pool) for (let n = 0; n < Math.max(score(w), 1); n++) tickets.push(w);
 
-  /* Best goal-match first, then the daily rotation decides between equals;
-     anything resembling a recent session drops to the back. */
-  const ranked = rotated
-    .map((w, i) => ({ w, i, s: score(w), stale: recent.some(a => w.title.toLowerCase().includes(a)) }))
-    .sort((a, b) => (a.stale - b.stale) || (b.s - a.s) || (a.i - b.i))
-    .map(x => x.w);
+  const offset = hashStr(dateStr + "|" + (profile.id || "")) % Math.max(tickets.length, 1);
+  const rotated = tickets.slice(offset).concat(tickets.slice(0, offset));
 
-  return ranked.slice(0, 3);
+  const fresh = [], stale = [], seen = new Set();
+  for (const w of rotated) {
+    if (seen.has(w.id)) continue;
+    seen.add(w.id);
+    (recent.some(a => w.title.toLowerCase().includes(a)) ? stale : fresh).push(w);
+  }
+  return fresh.concat(stale).slice(0, 3);
 }
 
 /* The only function the UI calls. Asks Claude for something written for this
