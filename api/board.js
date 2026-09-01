@@ -23,6 +23,10 @@ export default endpoint(async (req, res) => {
     sql`SELECT id, text, added_by FROM fun_ideas ORDER BY id`,
   ]);
   /* Lets an open tab notice it is running superseded code. */
-  const build = process.env.VERCEL_GIT_COMMIT_SHA || "dev";
+  /* CLI deploys have no commit SHA, so fall back to the per-deployment id. */
+  const build = process.env.VERCEL_DEPLOYMENT_ID
+    || process.env.VERCEL_GIT_COMMIT_SHA
+    || process.env.VERCEL_URL
+    || "dev";
   res.status(200).json({ users, entries, funIdeas, build });
 });
