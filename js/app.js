@@ -398,7 +398,7 @@ function renderToday() {
 
 /* The photo control under the fun card: add, preview-before-upload,
    uploading, or the photo you already have. */
-function photoSection(ds, fun) {
+function photoSection(ds, fun, opts = {}) {
   const draft = ui.photoDraft && ui.photoDraft.date === ds ? ui.photoDraft : null;
   const photoId = fun && fun.photo_id;
   const err = ui.photoError ? `<div class="photo-error">${esc(ui.photoError)}</div>` : "";
@@ -434,8 +434,8 @@ function photoSection(ds, fun) {
   }
 
   return `${err}<div class="actions">
-    <button class="btn ghost" data-action="pick-photo" data-date="${ds}">📷 Add a photo</button>
-  </div>${photoStreakLine(ds)}`;
+    <button class="btn ghost ${opts.compact ? "small" : ""}" data-action="pick-photo" data-date="${ds}">📷 Add a photo</button>
+  </div>${opts.compact ? "" : photoStreakLine(ds)}`;
 }
 
 /* The nudge: only worth showing when there's a streak to lose. */
@@ -567,9 +567,11 @@ function cellPanel(u, ds, today) {
   return `<div class="panel">
     <b>${esc(prettyDate(ds))}</b>
     ${lines.map(l => `<div class="small">${l}</div>`).join("")}
-    ${fun && fun.photo_id ? `<img class="panel-photo" data-photo="${esc(fun.photo_id)}"
-        data-action="photo-open" data-photo-id="${esc(fun.photo_id)}"
-        data-id="${esc(u.id)}" data-date="${ds}" alt="Photo from ${esc(u.name)}">` : ""}
+    ${fun && fun.photo_id && !(editable && ui.photoDraft && ui.photoDraft.date === ds)
+      ? `<img class="panel-photo" data-photo="${esc(fun.photo_id)}"
+          data-action="photo-open" data-photo-id="${esc(fun.photo_id)}"
+          data-id="${esc(u.id)}" data-date="${ds}" alt="Photo from ${esc(u.name)}">` : ""}
+    ${editable ? photoSection(ds, fun, { compact: true }) : ""}
     ${editable ? `<div class="row">
       ${ex && ex.done
         ? `<button class="btn small" data-action="backfill" data-date="${ds}" data-kind="exercise" data-done="0">Clear exercise</button>`
