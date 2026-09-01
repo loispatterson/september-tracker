@@ -5,7 +5,8 @@ import { currentStreak, bestStreak, totalHits, dayResult, HIT, MISS, PENDING } f
 import { getSuggestions } from "./suggestions.js";
 import { funPromptFor } from "./fun.js";
 import { AGE_BANDS, GOALS, FITNESS, isLegacyBand } from "./profile.js";
-import { buildLogs } from "./logs.js";
+import { buildLogs, minutesOf, prettyMinutes, describeEntry, totalMinutes,
+         DEFAULT_MINUTES } from "./logs.js";
 import { galleryItems } from "./imageutil.js";
 import { prepareUpload, blobToBase64, hydratePhotos, forgetPhoto, cachedUrl } from "./photos.js";
 
@@ -31,6 +32,8 @@ const ui = {
   showSuggestions: false,
   funSwap: 0,
   funOwn: false,
+  exOther: false,                 /* "Other…" free-text entry is open */
+  customMinutes: false,           /* typing a duration the chips don't cover */
   cell: null,                     /* { userId, date } open popover */
   loading: true,
   photoTarget: null,              /* date the picker was opened for */
@@ -77,6 +80,8 @@ async function loadMyProfile() {
 }
 function entryFor(log, ds, userId) { return (log[ds] && log[ds][userId]) || null; }
 
+const MINUTE_OPTIONS = [30, 45, 60, 90];
+
 function rebuildLogs() {
   ({ exLog, funLog, photoLog } = buildLogs(board.entries));
 }
@@ -97,14 +102,17 @@ async function refresh() {
 }
 
 /* Optimistic write: update local state, render, then persist and reconcile. */
-async function saveEntry({ date, kind, done, activity, note }) {
-  const local = { user_id: me.id, date, kind, done, activity: activity || null, note: note || null };
+async function saveEntry({ date, kind, done, activity, note, minutes, distanceKm }) {
+  const local = { user_id: me.id, date, kind, done,
+    activity: activity || null, note: note || null,
+    minutes: minutes == null ? null : minutes,
+    distance_km: distanceKm == null ? null : distanceKm };
   board.entries = board.entries.filter(e => !(e.user_id === me.id && e.date === date && e.kind === kind));
   if (done !== null) board.entries.push(local);
   rebuildLogs();
   render();
   try {
-    await api.saveEntry({ date, kind, done, activity, note });
+    await api.saveEntry({ date, kind, done, activity, note, minutes, distanceKm });
     await refresh();
     render();
   } catch (e) {
@@ -238,15 +246,47 @@ function renderToday() {
   let exHtml;
   if (ex && ex.done) {
     exHtml = `<div class="done-banner">
-        <span>✅ 30 min done${ex.activity ? " · " + esc(ex.activity) : ""}</span>
+        <span>✅ ${esc(describeEntry(ex))}</span>
         <button class="btn small" data-action="undo-ex">Undo</button>
       </div>
-      ${ex.note ? `<p class="small muted">${esc(ex.note)}</p>` : ""}`;
+      ${ex.note ? `<p class="small muted">${esc(ex.note)}</p>` : ""}
+      <div class="field">
+        <label>How long?</label>
+        <div class="chips">${MINUTE_OPTIONS.map(m =>
+          `<button class="chip ${minutesOf(ex) === m ? "on" : ""}" data-action="set-minutes" data-val="${m}">${prettyMinutes(m)}</button>`).join("")}
+          <button class="chip ${ui.customMinutes ? "on" : ""}" data-action="toggle-custom-minutes">More…</button>
+        </div>
+        ${ui.customMinutes ? `<div class="actions">
+          <input type="text" id="minutes-input" inputmode="numeric" style="max-width:7em"
+                 value="${minutesOf(ex)}" placeholder="minutes" autocomplete="off">
+          <button class="btn small" data-action="save-minutes">Set</button>
+        </div>` : ""}
+      </div>
+      <div class="field">
+        <label>Distance <span class="muted">(optional, km)</span></label>
+        <div class="actions">
+          <input type="text" id="distance-input" inputmode="decimal" style="max-width:7em"
+                 value="${ex.distance_km == null ? "" : Number(ex.distance_km)}" placeholder="e.g. 6.2" autocomplete="off">
+          <button class="btn small" data-action="save-distance">Save</button>
+        </div>
+      </div>`;
+  } else if (ui.exOther) {
+    exHtml = `<div class="field">
+        <label>What did you do?</label>
+        <input type="text" id="ex-other-input" placeholder="e.g. Bouldering, horse riding, 4h hike" autocomplete="off">
+      </div>
+      <div class="actions">
+        <button class="btn primary" data-action="log-ex-other">Log it</button>
+        <button class="btn ghost" data-action="toggle-ex-other">Cancel</button>
+      </div>`;
   } else {
     exHtml = `<div class="chips">
-        ${ACTIVITIES.map(a => `<button class="chip" data-action="log-ex" data-activity="${a}">${a}</button>`).join("")}
+        ${ACTIVITIES.map(a => a === "Other"
+          ? `<button class="chip" data-action="toggle-ex-other">Other…</button>`
+          : `<button class="chip" data-action="log-ex" data-activity="${a}">${a}</button>`).join("")}
       </div>
-      <p class="small muted">Tap what you did — that logs your 30 minutes.</p>
+      <p class="small muted">Tap what you did — that logs 30 minutes, and you can
+        change the time or add a distance afterwards.</p>
       <button class="btn ghost small" data-action="toggle-suggestions">${ui.showSuggestions ? "Hide ideas" : "Need an idea?"}</button>
       ${ui.showSuggestions ? suggestions.map(w => `
         <div class="suggestion">
@@ -303,6 +343,7 @@ function renderToday() {
     return `<div class="friend-row">
       <span>${u.emoji}</span>
       <span class="name">${esc(u.name)}${u.id === me.id ? " <span class='muted small'>(you)</span>" : ""}</span>
+      ${e && e.done ? `<span class="small muted">${esc(prettyMinutes(minutesOf(e)))}</span>` : ""}
       <span class="marks">${e && e.done ? "✅" : "⬜"}${f && f.done ? "🎉" : "⬜"}</span>
     </div>`;
   }).join("");
@@ -471,6 +512,7 @@ function renderBoard() {
       </div>
       <div class="streaks">
         <span class="stats">🔥 ${cur} · best ${best} · ${tot}/30</span>
+        <span class="stats time">⏱ ${prettyMinutes(totalMinutes(board.entries, u.id))}</span>
         <span class="stats fun">🎉 ${funStreak}</span>
         <span class="stats photo">📸 ${photoStreak}</span>
       </div>
@@ -486,7 +528,7 @@ function cellPanel(u, ds, today) {
   const preJoin = ds < joinedOf(u) && !ex;
   const blank = ds > today ? "⬜ Not yet" : preJoin ? "· Before they joined" : null;
   const lines = [
-    ex && ex.done ? `✅ Exercise: ${esc(ex.activity || "done")}${ex.note ? " — " + esc(ex.note) : ""}` :
+    ex && ex.done ? `✅ ${esc(describeEntry(ex))}${ex.note ? " — " + esc(ex.note) : ""}` :
       (blank || "❌ No exercise logged"),
     fun && fun.done ? `🎉 Fun: ${esc(fun.activity || "done")}${fun.note ? " — " + esc(fun.note) : ""}` :
       (ds > today || preJoin ? "" : "⬜ No fun logged"),
@@ -633,7 +675,8 @@ async function loadSuggestions() {
   if (!p) return;
   const yesterday = addDays(todayStr(), -1);
   const y = entryFor(exLog, yesterday, me.id);
-  suggestions = await getSuggestions(p, todayStr(), y && y.activity ? [y.activity] : []);
+  suggestions = await getSuggestions(p, todayStr(), y && y.activity ? [y.activity] : [],
+    { yesterdayMinutes: y && y.done ? minutesOf(y) : 0 });
 }
 
 /* ---------- actions ---------- */
@@ -827,8 +870,52 @@ async function onClick(ev) {
   if (a === "toggle-suggestions") { ui.showSuggestions = !ui.showSuggestions; render(); return; }
 
   if (a === "log-ex") {
-    await saveEntry({ date: today, kind: "exercise", done: true, activity: el.dataset.activity });
+    await saveEntry({ date: today, kind: "exercise", done: true,
+      activity: el.dataset.activity, minutes: DEFAULT_MINUTES });
     toast("Nice — 30 minutes logged 💪");
+    return;
+  }
+
+  if (a === "toggle-ex-other") { ui.exOther = !ui.exOther; render(); return; }
+
+  if (a === "log-ex-other") {
+    const what = (document.getElementById("ex-other-input").value || "").trim();
+    if (!what) return toast("What did you do?");
+    ui.exOther = false;
+    await saveEntry({ date: today, kind: "exercise", done: true,
+      activity: what, minutes: DEFAULT_MINUTES });
+    toast("Logged 💪");
+    return;
+  }
+
+  if (a === "toggle-custom-minutes") { ui.customMinutes = !ui.customMinutes; render(); return; }
+
+  if (a === "set-minutes" || a === "save-minutes") {
+    const raw = a === "set-minutes"
+      ? el.dataset.val
+      : (document.getElementById("minutes-input").value || "");
+    const mins = Math.round(Number(raw));
+    if (!Number.isFinite(mins) || mins < 5 || mins > 600) {
+      return toast("Give a time between 5 minutes and 10 hours");
+    }
+    if (a === "save-minutes") ui.customMinutes = false;
+    const cur = entryFor(exLog, today, me.id) || {};
+    await saveEntry({ date: today, kind: "exercise", done: true,
+      activity: cur.activity, note: cur.note, minutes: mins,
+      distanceKm: cur.distance_km == null ? null : Number(cur.distance_km) });
+    return;
+  }
+
+  if (a === "save-distance") {
+    const raw = (document.getElementById("distance-input").value || "").trim();
+    const km = raw === "" ? null : Number(raw.replace(",", "."));
+    if (km !== null && (!Number.isFinite(km) || km <= 0 || km > 999)) {
+      return toast("Give a distance in km, like 6.2");
+    }
+    const cur = entryFor(exLog, today, me.id) || {};
+    await saveEntry({ date: today, kind: "exercise", done: true,
+      activity: cur.activity, note: cur.note, minutes: minutesOf(cur), distanceKm: km });
+    toast(km === null ? "Distance cleared" : "Saved");
     return;
   }
   if (a === "undo-ex") { await saveEntry({ date: today, kind: "exercise", done: null }); return; }

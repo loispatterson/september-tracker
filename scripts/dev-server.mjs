@@ -246,7 +246,13 @@ async function apiRoute(req, res, path, q) {
 
   if (path === "/api/log" && req.method === "POST") {
     if (!userId) return needAuth();
-    const { date, kind, done, activity, note } = await body(req);
+    const logBody = await body(req);
+    const { date, kind, done, activity, note } = logBody;
+    const mins = Number(logBody.minutes);
+    const minutes = Number.isFinite(mins) ? Math.min(600, Math.max(5, Math.round(mins))) : null;
+    const dist = Number(logBody.distanceKm);
+    const distance_km = Number.isFinite(dist) && dist > 0
+      ? Math.min(999, Math.round(dist * 100) / 100) : null;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date || "") || date < "2026-09-01" || date > "2026-09-30")
       return send(res, 400, { error: "date must be in September 2026" });
     if (kind !== "exercise" && kind !== "fun") return send(res, 400, { error: "bad kind" });
@@ -258,7 +264,7 @@ async function apiRoute(req, res, path, q) {
     if (done !== null) {
       d.entries.push({ user_id: userId, date, kind, done: !!done,
         activity: activity ? String(activity).slice(0, 200) : null,
-        note: note ? String(note).slice(0, 500) : null });
+        note: note ? String(note).slice(0, 500) : null, minutes, distance_km });
     }
     await put(d);
     return send(res, 200, { ok: true });

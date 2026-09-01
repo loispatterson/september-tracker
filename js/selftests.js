@@ -3,11 +3,11 @@
    Pure logic only; no network, no DOM. */
 import { addDays, prettyDate, septDates, septDayNum, SEPT_START, SEPT_END } from "./dates.js";
 import { currentStreak, bestStreak, totalHits, dayResult, HIT, MISS, PENDING, NEUTRAL } from "./streaks.js";
-import { pickWorkouts, hashStr } from "./suggestions.js";
+import { pickWorkouts, hashStr, needsEasyDay } from "./suggestions.js";
 import { expandAgeBand } from "./profile.js";
 import { WORKOUTS } from "./data/workouts.js";
 import { funPromptFor, funPool } from "./fun.js";
-import { buildLogs } from "./logs.js";
+import { buildLogs, minutesOf, prettyMinutes, describeEntry, totalMinutes } from "./logs.js";
 import { readExifOrientation, orientationTransform, fitDimensions, galleryItems } from "./imageutil.js";
 
 export function runSelfTests() {
@@ -121,6 +121,43 @@ export function runSelfTests() {
   check("a profile with no goals still gets suggestions",
     pickWorkouts({ id: U, ageBand: "40-44", goals: [], fitness: "regular" },
       "2026-09-05", [], WORKOUTS).length, 3);
+
+  /* ---- duration and distance ---- */
+  check("missing duration means the challenge's 30", minutesOf({ done: true }), 30);
+  check("zero is not a duration", minutesOf({ minutes: 0 }), 30);
+  check("a real duration is kept", minutesOf({ minutes: 240 }), 240);
+  check("minutes under an hour", prettyMinutes(45), "45 min");
+  check("exactly an hour", prettyMinutes(60), "1h");
+  check("hours and minutes", prettyMinutes(255), "4h 15m");
+  check("describes time, activity and distance",
+    describeEntry({ minutes: 45, activity: "Run", distance_km: 6.2 }), "45 min · Run · 6.2 km");
+  check("describes what it has", describeEntry({ activity: "Gym" }), "30 min · Gym");
+  check("free-text activity survives",
+    describeEntry({ minutes: 240, activity: "Hike up Le Brévent" }), "4h · Hike up Le Brévent");
+  check("no distance, no km", describeEntry({ minutes: 30, activity: "Yoga", distance_km: 0 }), "30 min · Yoga");
+  const timeEntries = [
+    { user_id: "u_1", kind: "exercise", done: true, minutes: 240 },
+    { user_id: "u_1", kind: "exercise", done: true },              /* legacy: 30 */
+    { user_id: "u_1", kind: "fun", done: true, minutes: 999 },     /* not exercise */
+    { user_id: "u_2", kind: "exercise", done: true, minutes: 60 },
+  ];
+  check("monthly total counts only your own exercise", totalMinutes(timeEntries, "u_1"), 270);
+  check("total for someone with nothing", totalMinutes(timeEntries, "u_9"), 0);
+
+  /* ---- an easy day after a long one ---- */
+  check("90 minutes triggers an easy day", [needsEasyDay(89), needsEasyDay(90), needsEasyDay(240)],
+    [false, true, true]);
+  check("no session yesterday is not an easy day", needsEasyDay(0), false);
+  const active = { id: U, ageBand: "30-34", goals: ["cardio"], fitness: "veryactive" };
+  check("a 4-hour hike makes today gentle",
+    pickWorkouts(active, "2026-09-10", [], WORKOUTS, { yesterdayMinutes: 240 })
+      .every(w => w.intensity !== "high"), true);
+  check("a normal day is not forced gentle",
+    pickWorkouts(active, "2026-09-10", [], WORKOUTS, { yesterdayMinutes: 45 })
+      .some(w => w.intensity === "high"), true);
+  check("an easy day still returns 3",
+    pickWorkouts({ id: U, ageBand: "65plus", goals: ["strength"], fitness: "starting" },
+      "2026-09-10", [], WORKOUTS, { yesterdayMinutes: 300 }).length, 3);
 
   /* ---- fun prompts ---- */
   check("pool includes curated + db", funPool([{ text: "x" }]).length, 31);

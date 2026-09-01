@@ -30,6 +30,11 @@ CREATE TABLE IF NOT EXISTS entries (
   PRIMARY KEY (user_id, date, kind)
 );
 
+-- how long it actually took. 30 is the challenge, but people do more.
+ALTER TABLE entries ADD COLUMN IF NOT EXISTS minutes int;
+-- optional, and only meaningful for some activities: runs, walks, rides, swims
+ALTER TABLE entries ADD COLUMN IF NOT EXISTS distance_km numeric(6,2);
+
 CREATE TABLE IF NOT EXISTS fun_ideas (
   id         serial PRIMARY KEY,
   text       text NOT NULL,

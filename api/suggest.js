@@ -45,10 +45,19 @@ should load that knee.
 desc is two or three plain sentences telling them what to actually do, with sets,
 reps or times. No preamble, no motivational filler, no markdown.
 
+If they did something long or hard yesterday, make today deliberately easy -
+gentle movement, mobility, a walk - and say briefly that it is a recovery day.
+
 Stick to exercise. Do not give diet, weight-loss or medical advice, even if the
 person's goal is losing weight - suggest movement that supports it instead.`;
 
-function profileLines(p, recent, dayNum) {
+function prettyMinutes(m) {
+  if (m < 60) return `${m} minutes`;
+  const h = Math.floor(m / 60), rest = m % 60;
+  return rest ? `${h}h ${rest}m` : `${h} hours`;
+}
+
+function profileLines(p, recent, dayNum, yesterday) {
   const lines = [
     `Age band: ${p.age_band || "unknown"}`,
     `Goals: ${(p.goals || p.goal || "general").split(",").join(", ")}`,
@@ -56,6 +65,12 @@ function profileLines(p, recent, dayNum) {
     `Today is day ${dayNum} of a 30-day everyday-exercise challenge.`,
   ];
   if (p.note) lines.push(`In their own words: ${p.note}`);
+  if (yesterday) {
+    const bits = [prettyMinutes(yesterday.minutes)];
+    if (yesterday.activity) bits.push(yesterday.activity);
+    if (yesterday.distance_km) bits.push(`${Number(yesterday.distance_km)} km`);
+    lines.push(`Yesterday they did: ${bits.join(", ")}.`);
+  }
   lines.push(recent.length
     ? `Already done this month: ${recent.join(", ")}. Suggest something different where sensible.`
     : `Nothing logged yet this month.`);
@@ -73,11 +88,20 @@ export default endpoint(async (req, res, userId) => {
   const p = rows[0];
   if (p.goals) p.goals = cleanGoals(p.goals).join(",");
 
-  const done = await sql`SELECT activity FROM entries
+  const done = await sql`SELECT activity, minutes, distance_km FROM entries
                          WHERE user_id = ${userId} AND kind = 'exercise' AND done
                          ORDER BY date DESC LIMIT 8`;
   const recent = [...new Set(done.map(r => r.activity).filter(Boolean))];
   const dayNum = Number(String(req.body?.date || "").slice(8)) || 1;
+
+  /* Yesterday specifically: a long session there should make today easy. */
+  const date = String(req.body?.date || "");
+  const prev = /^\d{4}-\d{2}-\d{2}$/.test(date)
+    ? (await sql`SELECT activity, minutes, distance_km FROM entries
+                 WHERE user_id = ${userId} AND kind = 'exercise' AND done
+                   AND date = to_char(${date}::date - 1, 'YYYY-MM-DD')`)[0]
+    : null;
+  const yesterday = prev ? { ...prev, minutes: Number(prev.minutes) || 30 } : null;
 
   const client = new Anthropic();
   const message = await client.messages.create({
@@ -90,7 +114,7 @@ export default endpoint(async (req, res, userId) => {
       effort: "low",
       format: { type: "json_schema", schema: SUGGESTION_SCHEMA },
     },
-    messages: [{ role: "user", content: profileLines(p, recent, dayNum) }],
+    messages: [{ role: "user", content: profileLines(p, recent, dayNum, yesterday) }],
   });
 
   /* Safety classifiers can decline; check before reading content. */

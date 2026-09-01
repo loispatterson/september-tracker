@@ -29,18 +29,33 @@ const ALLOWED_INTENSITY = {
 /* Pure rule engine, and the fallback whenever the AI endpoint is unavailable.
    Scores by how many of the person's goals a workout serves, filtered to their
    age band and a sensible intensity for their fitness level. */
-export function pickWorkouts(profile, dateStr, recentActivities, library = WORKOUTS) {
+/* A long day yesterday earns an easy day today. */
+export const LONG_SESSION_MINUTES = 90;
+export function needsEasyDay(yesterdayMinutes) {
+  return Number(yesterdayMinutes) >= LONG_SESSION_MINUTES;
+}
+
+export function pickWorkouts(profile, dateStr, recentActivities, library = WORKOUTS, opts = {}) {
   const bands = expandAgeBand(profile.ageBand);
   const goals = (profile.goals && profile.goals.length ? profile.goals : ["general"]);
-  const intensities = ALLOWED_INTENSITY[profile.fitness] || ["low", "med", "high"];
+  let intensities = ALLOWED_INTENSITY[profile.fitness] || ["low", "med", "high"];
   const recent = (recentActivities || []).map(a => String(a).toLowerCase());
+
+  /* After a 4-hour hike, don't propose intervals: keep today gentle. */
+  const easy = needsEasyDay(opts.yesterdayMinutes);
+  if (easy) intensities = intensities.includes("low") ? ["low"] : ["med"];
 
   const fits = w => w.ageBands.some(b => bands.includes(b));
   const score = w => goals.reduce((n, g) => n + (w.goals.includes(g) ? 1 : 0), 0);
 
   let pool = library.filter(w => fits(w) && score(w) > 0 && intensities.includes(w.intensity));
-  /* Widen rather than return nothing: intensity first, then goals. */
-  if (pool.length < 3) pool = library.filter(w => fits(w) && score(w) > 0);
+  /* Widen rather than return nothing — but on an easy day, drop the goal
+     filter before the intensity cap: recovery matters more than goal match. */
+  if (pool.length < 3) {
+    pool = easy
+      ? library.filter(w => fits(w) && intensities.includes(w.intensity))
+      : library.filter(w => fits(w) && score(w) > 0);
+  }
   if (pool.length < 3) pool = library.filter(fits);
   if (pool.length < 3) pool = library.slice();
 
@@ -69,7 +84,7 @@ export function pickWorkouts(profile, dateStr, recentActivities, library = WORKO
    is simply not configured — so suggestions always appear. */
 let aiConfigured = true;   /* until the server tells us otherwise */
 
-export async function getSuggestions(profile, dateStr, recentActivities) {
+export async function getSuggestions(profile, dateStr, recentActivities, opts = {}) {
   if (aiConfigured) {
     try {
       const { workouts } = await api.suggest(dateStr);
@@ -82,5 +97,5 @@ export async function getSuggestions(profile, dateStr, recentActivities) {
       console.info("Using the built-in workout library:", e.message);
     }
   }
-  return pickWorkouts(profile, dateStr, recentActivities);
+  return pickWorkouts(profile, dateStr, recentActivities, WORKOUTS, opts);
 }

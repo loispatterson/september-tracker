@@ -17,3 +17,34 @@ export function buildLogs(entries) {
   }
   return { exLog, funLog, photoLog };
 }
+
+export const DEFAULT_MINUTES = 30;
+
+/* Entries logged before durations existed are the challenge's 30 minutes. */
+export function minutesOf(entry) {
+  const m = Number(entry && entry.minutes);
+  return Number.isFinite(m) && m > 0 ? m : DEFAULT_MINUTES;
+}
+
+export function prettyMinutes(mins) {
+  const m = Math.round(mins);
+  if (m < 60) return `${m} min`;
+  const h = Math.floor(m / 60), rest = m % 60;
+  return rest ? `${h}h ${rest}m` : `${h}h`;
+}
+
+/* "45 min · Run · 6.2 km" — whatever of that we actually know. */
+export function describeEntry(entry) {
+  const bits = [prettyMinutes(minutesOf(entry))];
+  if (entry.activity) bits.push(entry.activity);
+  if (entry.distance_km != null && Number(entry.distance_km) > 0) {
+    bits.push(`${Number(entry.distance_km)} km`);
+  }
+  return bits.join(" · ");
+}
+
+/* Total exercise time someone has logged, in minutes. */
+export function totalMinutes(entries, userId) {
+  return (entries || []).reduce((n, e) =>
+    e.user_id === userId && e.kind === "exercise" && e.done ? n + minutesOf(e) : n, 0);
+}
