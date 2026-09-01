@@ -218,6 +218,14 @@ async function apiRoute(req, res, path, q) {
     const { emoji, ageBand, fitness, note } = payload;
     const u = d.users.find(x => x.id === userId);
     if (!u) return send(res, 400, { error: "unknown user" });
+    if (payload.name !== undefined) {
+      const nm = String(payload.name || "").trim().slice(0, 40);
+      if (!nm) return send(res, 400, { error: "name can't be empty" });
+      if (d.users.some(x => x.id !== userId && x.name === nm)) {
+        return send(res, 409, { error: "Someone already has that name" });
+      }
+      u.name = nm;
+    }
     if (emoji) u.emoji = String(emoji).slice(0, 8);
     if (ageBand) {
       if (!validAgeBand(ageBand)) return send(res, 400, { error: "bad ageBand" });

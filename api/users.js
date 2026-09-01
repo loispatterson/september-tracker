@@ -38,6 +38,9 @@ export default endpoint(async (req, res) => {
 
 const patch = endpoint(async (req, res, userId) => {
   const { emoji, ageBand, fitness, note } = req.body || {};
+  const name = (req.body || {}).name === undefined
+    ? null : String(req.body.name || "").trim().slice(0, 40);
+  if (name !== null && !name) return bad(res, "name can't be empty");
   const hasGoals = (req.body || {}).goals !== undefined;
   const goals = hasGoals ? cleanGoals(req.body.goals) : null;
 
@@ -45,7 +48,9 @@ const patch = endpoint(async (req, res, userId) => {
   if (fitness && !FITNESS.includes(fitness)) return bad(res, "bad fitness level");
   if (hasGoals && !goals.length) return bad(res, "pick at least one goal");
 
-  await sql`UPDATE users SET
+  try {
+    await sql`UPDATE users SET
+              name     = COALESCE(${name}, name),
               emoji    = COALESCE(${emoji ? String(emoji).slice(0, 8) : null}, emoji),
               age_band = COALESCE(${ageBand || null}, age_band),
               fitness  = COALESCE(${fitness || null}, fitness),
@@ -53,7 +58,15 @@ const patch = endpoint(async (req, res, userId) => {
               goal     = COALESCE(${goals ? goals[0] : null}, goal),
               note     = COALESCE(${note === undefined ? null : cleanNote(note)}, note)
             WHERE id = ${userId}`;
-  res.status(200).json({ ok: true });
+  } catch (e) {
+    /* Names are how people find themselves on the "Who are you?" list, so two
+       accounts must never share one. */
+    if (String(e).includes("users_name_key")) {
+      return res.status(409).json({ error: "Someone already has that name" });
+    }
+    throw e;
+  }
+  res.status(200).json({ ok: true, name: name || undefined });
 }, { auth: true });
 
 export { GOALS };

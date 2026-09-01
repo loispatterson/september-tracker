@@ -580,7 +580,13 @@ function renderProfile() {
   return `
     <div class="card">
       <h2>Your profile</h2>
-      <p><b>${p.emoji} ${esc(p.name)}</b></p>
+      <div class="field">
+        <label>Your name <span class="muted">(this is what everyone sees)</span></label>
+        <input type="text" id="profile-name" value="${esc(p.name)}" maxlength="40" autocomplete="off">
+        <div class="actions">
+          <button class="btn" data-action="save-name">Save name</button>
+        </div>
+      </div>
       <div class="field">
         <label>Avatar</label>
         <div class="chips">${EMOJIS.map(e =>
@@ -991,6 +997,25 @@ async function onClick(ev) {
   if (a === "backfill") {
     const done = el.dataset.done === "1";
     await saveEntry({ date: el.dataset.date, kind: el.dataset.kind, done: done ? true : null });
+    return;
+  }
+
+  if (a === "save-name") {
+    const name = (document.getElementById("profile-name").value || "").trim();
+    if (!name) return toast("Your name can't be empty");
+    if (name === me.name) return toast("That's already your name");
+    try {
+      await api.updateUser({ name });
+      me = { ...me, name };
+      localStorage.setItem(ME_KEY, JSON.stringify(me));
+      await refresh();
+      await loadMyProfile();
+      toast(`You're ${name} now`);
+      render();
+    } catch (e) {
+      if (isAuthError(e)) return signedOut();
+      toast(errorMessage(e) || "Couldn't change your name");
+    }
     return;
   }
 
