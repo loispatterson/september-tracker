@@ -39,6 +39,7 @@ const ui = {
   photoBusy: false,
   photoError: "",
   lightbox: null,                 /* { photoId, name, emoji, date, activity } */
+  galleryUser: null,              /* gallery filter, null = everyone */
   confirmFunClear: null,          /* date awaiting "this deletes your photo" */
 };
 
@@ -353,17 +354,27 @@ function photoStreakLine(ds) {
 }
 
 function renderGallery() {
-  const items = galleryItems(board.entries, board.users);
+  const all = galleryItems(board.entries, board.users);
+  const photographers = board.users.filter(u => all.some(i => i.userId === u.id));
+  /* If the filtered person has no photos left (removed, or un-logged), fall
+     back to everyone rather than showing a confusing empty grid. */
+  const filter = photographers.some(u => u.id === ui.galleryUser) ? ui.galleryUser : null;
+  const items = filter ? all.filter(i => i.userId === filter) : all;
+
   const mine = me ? currentStreak(me.id, photoLog, todayStr(), joinedOf(getUser(me.id) || {})) : 0;
   const myTotal = me ? totalHits(me.id, photoLog, todayStr(), joinedOf(getUser(me.id) || {})) : 0;
 
-  const people = new Set(items.map(i => i.userId)).size;
   const header = `<div class="card">
     <h2>📸 Photos</h2>
     <p class="small">You: 📸 ${mine} in a row, ${myTotal} photo${myTotal === 1 ? "" : "s"}.
-      ${items.length} in all from ${people} ${people === 1 ? "person" : "people"}.</p>
+      ${all.length} in all from ${photographers.length} ${photographers.length === 1 ? "person" : "people"}.</p>
     <p class="small muted">A photo streak counts days in a row with a photo, so a fun day
       without one breaks it.</p>
+    ${photographers.length > 1 ? `<div class="chips">
+      <button class="chip ${filter ? "" : "on"}" data-action="gallery-filter" data-id="">Everyone</button>
+      ${photographers.map(u => `<button class="chip ${filter === u.id ? "on" : ""}"
+        data-action="gallery-filter" data-id="${u.id}">${u.emoji} ${esc(u.name)}</button>`).join("")}
+    </div>` : ""}
   </div>`;
 
   if (!items.length) {
@@ -668,6 +679,8 @@ async function onClick(ev) {
   }
 
   if (a === "photo-close") { ui.lightbox = null; render(); return; }
+
+  if (a === "gallery-filter") { ui.galleryUser = el.dataset.id || null; render(); return; }
 
   if (a === "undo-fun-cancel") { ui.confirmFunClear = null; render(); return; }
 

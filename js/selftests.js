@@ -194,6 +194,11 @@ export function runSelfTests() {
   check("gallery joins the user", gi[2].emoji, "🐙");
   check("gallery drops entries whose user is missing", gi.some(i => i.userId === "ghost"), false);
   check("gallery handles empty input", galleryItems([], []), []);
+  check("gallery filters to one person", galleryItems(gEntries, gUsers, "u1").map(i => i.photoId), ["c", "a"]);
+  check("filtered gallery keeps the sort", galleryItems(gEntries, gUsers, "u1").map(i => i.date),
+    ["2026-09-02", "2026-09-01"]);
+  check("filtering by someone with no photos gives nothing", galleryItems(gEntries, gUsers, "ghost"), []);
+  check("null filter means everyone", galleryItems(gEntries, gUsers, null).length, 3);
 
   console.log(`${pass} passed, ${fail} failed`);
   return { pass, fail };

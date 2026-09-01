@@ -86,11 +86,13 @@ export function fitDimensions(w, h, maxEdge) {
 }
 
 /* Everything the Gallery shows, newest day first then by name. Derived from the
-   board we already fetch, so the gallery needs no endpoint of its own. */
-export function galleryItems(entries, users) {
+   board we already fetch, so the gallery needs no endpoint of its own.
+   Pass userId to show just one person's photos. */
+export function galleryItems(entries, users, userId = null) {
   const byId = new Map((users || []).map(u => [u.id, u]));
   return (entries || [])
     .filter(e => e.kind === "fun" && e.photo_id && byId.has(e.user_id))
+    .filter(e => !userId || e.user_id === userId)
     .map(e => ({
       photoId: e.photo_id,
       userId: e.user_id,
