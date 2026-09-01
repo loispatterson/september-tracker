@@ -104,18 +104,38 @@ export default endpoint(async (req, res, userId) => {
   const yesterday = prev ? { ...prev, minutes: Number(prev.minutes) || 30 } : null;
 
   const client = new Anthropic();
-  const message = await client.messages.create({
-    model: "claude-opus-5",
-    max_tokens: 8000,
-    system: SYSTEM,
-    /* Short, scoped generation: low effort keeps it fast and cheap, which
-       matters because a person is waiting on the Today screen. */
-    output_config: {
-      effort: "low",
-      format: { type: "json_schema", schema: SUGGESTION_SCHEMA },
-    },
-    messages: [{ role: "user", content: profileLines(p, recent, dayNum, yesterday) }],
-  });
+  /* An identity-linked key spans several workspaces and the API then needs to
+     be told which one to bill and rate-limit against. A key created inside a
+     single workspace doesn't need this. */
+  const headers = process.env.ANTHROPIC_WORKSPACE_ID
+    ? { "anthropic-workspace-id": process.env.ANTHROPIC_WORKSPACE_ID }
+    : undefined;
+
+  let message;
+  try {
+    message = await client.messages.create({
+      model: "claude-opus-5",
+      max_tokens: 8000,
+      system: SYSTEM,
+      /* Short, scoped generation: low effort keeps it fast and cheap, which
+         matters because a person is waiting on the Today screen. */
+      output_config: {
+        effort: "low",
+        format: { type: "json_schema", schema: SUGGESTION_SCHEMA },
+      },
+      messages: [{ role: "user", content: profileLines(p, recent, dayNum, yesterday) }],
+    }, { headers });
+  } catch (e) {
+    /* Say what actually went wrong: a generic 500 here meant log-diving to
+       discover a missing workspace id. The client falls back either way. */
+    console.error("suggest: Anthropic call failed", e.status, e.message);
+    const needsWorkspace = String(e.message || "").includes("anthropic-workspace-id");
+    return res.status(502).json({
+      error: needsWorkspace
+        ? "This API key is linked to several workspaces, so ANTHROPIC_WORKSPACE_ID must be set too (or use a key created inside one workspace)."
+        : `Claude API error ${e.status || ""}: ${String(e.message || "").slice(0, 200)}`,
+    });
+  }
 
   /* Safety classifiers can decline; check before reading content. */
   if (message.stop_reason === "refusal") {
