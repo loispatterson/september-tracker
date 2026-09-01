@@ -78,6 +78,7 @@ async function apiRoute(req, res, path, q) {
           photo_id: e.kind === "fun" ? (d.photos[e.user_id + "|" + e.date] || {}).id || null : null,
         })),
       funIdeas: d.funIdeas,
+      build: "dev",
     });
   }
 

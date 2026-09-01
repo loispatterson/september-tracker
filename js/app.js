@@ -87,9 +87,15 @@ function rebuildLogs() {
 }
 
 /* ---------- data ---------- */
+/* The build this tab loaded. If the board starts reporting a different one,
+   a new version has been deployed and this tab is running stale code. */
+let loadedBuild = null;
+
 async function refresh() {
   try {
     board = await api.getBoard();
+    if (loadedBuild === null) loadedBuild = board.build || null;
+    else if (board.build && board.build !== loadedBuild) return updateAvailable();
     ui.needPasscode = false;
     ui.offline = false;
     rebuildLogs();
@@ -122,6 +128,20 @@ async function saveEntry({ date, kind, done, activity, note, minutes, distanceKm
     await refresh();   /* drop the optimistic edit rather than showing a lie */
     render();
   }
+}
+
+/* A newer version is deployed. Don't yank the page out from under someone
+   mid-upload; otherwise reload so nobody is quietly using an old app. */
+let updatePending = false;
+function updateAvailable() {
+  if (updatePending) return;
+  updatePending = true;
+  if (ui.photoBusy || ui.photoDraft || ui.exOther || ui.funOwn) {
+    toast("An update is ready — finish this and it'll refresh");
+    return;
+  }
+  toast("Updating to the newest version…");
+  setTimeout(() => location.reload(), 1200);
 }
 
 /* This device's session is no longer valid — back to the name list. */

@@ -22,5 +22,7 @@ export default endpoint(async (req, res) => {
         WHERE e.date >= '2026-09-01' AND e.date <= '2026-09-30'`,
     sql`SELECT id, text, added_by FROM fun_ideas ORDER BY id`,
   ]);
-  res.status(200).json({ users, entries, funIdeas });
+  /* Lets an open tab notice it is running superseded code. */
+  const build = process.env.VERCEL_GIT_COMMIT_SHA || "dev";
+  res.status(200).json({ users, entries, funIdeas, build });
 });
