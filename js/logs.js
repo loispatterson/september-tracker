@@ -43,6 +43,9 @@ export function describeEntry(entry) {
   return bits.join(" · ");
 }
 
+const FEELING_LABEL = { easy: "easy", good: "just right", hard: "tough" };
+export const feelingLabel = (f) => FEELING_LABEL[f] || "";
+
 /* Total exercise time someone has logged, in minutes. */
 export function totalMinutes(entries, userId) {
   return (entries || []).reduce((n, e) =>

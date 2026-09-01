@@ -41,3 +41,8 @@ export function expandAgeBand(band) {
     default: return AGE_BANDS.includes(band) ? [band] : [];
   }
 }
+
+/* How a session felt. Three levels is enough to steer the next day without
+   turning logging into a questionnaire. */
+export const FEELINGS = ["easy", "good", "hard"];
+export const validFeeling = (f) => FEELINGS.includes(f);

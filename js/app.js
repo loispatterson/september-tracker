@@ -2,11 +2,11 @@ import { api, setPasscode, setToken, clearToken, isPasscodeError, isAuthError,
          isNameTaken, errorMessage } from "./api.js";
 import { todayStr, prettyDate, septDates, septDayNum, SEPT_START, SEPT_END, addDays } from "./dates.js";
 import { currentStreak, bestStreak, totalHits, dayResult, HIT, MISS, PENDING } from "./streaks.js";
-import { getSuggestions } from "./suggestions.js";
+import { getSuggestions, getAiSuggestions, aiAvailable } from "./suggestions.js";
 import { funPromptFor } from "./fun.js";
-import { AGE_BANDS, GOALS, FITNESS, isLegacyBand } from "./profile.js";
+import { AGE_BANDS, GOALS, FITNESS, FEELINGS, isLegacyBand } from "./profile.js";
 import { buildLogs, minutesOf, prettyMinutes, describeEntry, totalMinutes,
-         DEFAULT_MINUTES } from "./logs.js";
+         feelingLabel, DEFAULT_MINUTES } from "./logs.js";
 import { galleryItems } from "./imageutil.js";
 import { prepareUpload, blobToBase64, hydratePhotos, forgetPhoto, cachedUrl } from "./photos.js";
 
@@ -19,6 +19,8 @@ let board = { users: [], entries: [], funIdeas: [] };
 let me = null;                    /* { id, name } from localStorage */
 let exLog = {}, funLog = {}, photoLog = {};   /* log[date][userId] = entry */
 let suggestions = [];
+let aiSuggestions = null;   /* Claude's, once they arrive */
+let aiAsked = false, aiBusy = false;
 
 /* ephemeral UI state — never persisted */
 const ui = {
@@ -108,17 +110,18 @@ async function refresh() {
 }
 
 /* Optimistic write: update local state, render, then persist and reconcile. */
-async function saveEntry({ date, kind, done, activity, note, minutes, distanceKm }) {
+async function saveEntry({ date, kind, done, activity, note, minutes, distanceKm, feeling }) {
   const local = { user_id: me.id, date, kind, done,
     activity: activity || null, note: note || null,
     minutes: minutes == null ? null : minutes,
-    distance_km: distanceKm == null ? null : distanceKm };
+    distance_km: distanceKm == null ? null : distanceKm,
+    feeling: feeling || null };
   board.entries = board.entries.filter(e => !(e.user_id === me.id && e.date === date && e.kind === kind));
   if (done !== null) board.entries.push(local);
   rebuildLogs();
   render();
   try {
-    await api.saveEntry({ date, kind, done, activity, note, minutes, distanceKm });
+    await api.saveEntry({ date, kind, done, activity, note, minutes, distanceKm, feeling });
     await refresh();
     render();
   } catch (e) {
@@ -266,10 +269,15 @@ function renderToday() {
   let exHtml;
   if (ex && ex.done) {
     exHtml = `<div class="done-banner">
-        <span>✅ ${esc(describeEntry(ex))}</span>
+        <span>✅ ${esc(describeEntry(ex))}${ex.feeling ? ` · felt ${esc(feelingLabel(ex.feeling))}` : ""}</span>
         <button class="btn small" data-action="undo-ex">Undo</button>
       </div>
       ${ex.note ? `<p class="small muted">${esc(ex.note)}</p>` : ""}
+      <div class="field">
+        <label>How was it?</label>
+        <div class="chips">${FEELINGS.map(([v, l]) =>
+          `<button class="chip ${ex.feeling === v ? "on" : ""}" data-action="set-feeling" data-val="${v}">${l}</button>`).join("")}</div>
+      </div>
       <div class="field">
         <label>How long?</label>
         <div class="chips">${MINUTE_OPTIONS.map(m =>
@@ -308,6 +316,8 @@ function renderToday() {
       <p class="small muted">Tap what you did — that logs 30 minutes, and you can
         change the time or add a distance afterwards.</p>
       <button class="btn ghost small" data-action="toggle-suggestions">${ui.showSuggestions ? "Hide ideas" : "Need an idea?"}</button>
+      ${ui.showSuggestions && aiBusy ? `<p class="small muted">Tailoring these to you…</p>` : ""}
+      ${ui.showSuggestions && aiSuggestions ? `<p class="small muted">Written for you today.</p>` : ""}
       ${ui.showSuggestions ? suggestions.map(w => `
         <div class="suggestion">
           <div>
@@ -696,13 +706,35 @@ function render() {
   hydratePhotos(document);
 }
 
-async function loadSuggestions() {
+/* Local picks, computed instantly. Startup never waits on the network. */
+function loadSuggestions() {
   const p = myProfile();
   if (!p) return;
   const yesterday = addDays(todayStr(), -1);
   const y = entryFor(exLog, yesterday, me.id);
-  suggestions = await getSuggestions(p, todayStr(), y && y.activity ? [y.activity] : [],
-    { yesterdayMinutes: y && y.done ? minutesOf(y) : 0 });
+  suggestions = getSuggestions(p, todayStr(), y && y.activity ? [y.activity] : [], {
+    yesterdayMinutes: y && y.done ? minutesOf(y) : 0,
+    yesterdayFeeling: y && y.done ? y.feeling : null,
+  });
+  aiSuggestions = null;
+  aiAsked = false;
+}
+
+/* Asked for only when someone opens the suggestions, then swapped in. */
+async function upgradeSuggestions() {
+  if (aiAsked || !aiAvailable()) return;
+  aiAsked = true;
+  aiBusy = true;
+  render();
+  try {
+    const workouts = await getAiSuggestions(todayStr());
+    if (workouts) { aiSuggestions = workouts; suggestions = workouts; }
+  } catch (e) {
+    if (isAuthError(e)) return signedOut();
+  } finally {
+    aiBusy = false;
+    render();
+  }
 }
 
 /* ---------- actions ---------- */
@@ -856,7 +888,7 @@ async function onClick(ev) {
       ui.draft.pin = "";
       await refresh();
       await loadMyProfile();
-      await loadSuggestions();
+      loadSuggestions();
       toast("You're in — welcome!");
       render();
     } catch (e) {
@@ -885,7 +917,7 @@ async function onClick(ev) {
       ui.onboardStep = "who";
       await refresh();
       await loadMyProfile();
-      await loadSuggestions();
+      loadSuggestions();
       render();
     } catch (e) {
       toast(errorMessage(e));   /* "wrong PIN", or the lockout message */
@@ -893,7 +925,12 @@ async function onClick(ev) {
     return;
   }
 
-  if (a === "toggle-suggestions") { ui.showSuggestions = !ui.showSuggestions; render(); return; }
+  if (a === "toggle-suggestions") {
+    ui.showSuggestions = !ui.showSuggestions;
+    render();
+    if (ui.showSuggestions) upgradeSuggestions();   /* not awaited: show now, improve shortly */
+    return;
+  }
 
   if (a === "log-ex") {
     await saveEntry({ date: today, kind: "exercise", done: true,
@@ -928,7 +965,17 @@ async function onClick(ev) {
     const cur = entryFor(exLog, today, me.id) || {};
     await saveEntry({ date: today, kind: "exercise", done: true,
       activity: cur.activity, note: cur.note, minutes: mins,
-      distanceKm: cur.distance_km == null ? null : Number(cur.distance_km) });
+      distanceKm: cur.distance_km == null ? null : Number(cur.distance_km),
+      feeling: cur.feeling });
+    return;
+  }
+
+  if (a === "set-feeling") {
+    const cur = entryFor(exLog, today, me.id) || {};
+    await saveEntry({ date: today, kind: "exercise", done: true,
+      activity: cur.activity, note: cur.note, minutes: minutesOf(cur),
+      distanceKm: cur.distance_km == null ? null : Number(cur.distance_km),
+      feeling: el.dataset.val });
     return;
   }
 
@@ -940,7 +987,8 @@ async function onClick(ev) {
     }
     const cur = entryFor(exLog, today, me.id) || {};
     await saveEntry({ date: today, kind: "exercise", done: true,
-      activity: cur.activity, note: cur.note, minutes: minutesOf(cur), distanceKm: km });
+      activity: cur.activity, note: cur.note, minutes: minutesOf(cur),
+      distanceKm: km, feeling: cur.feeling });
     toast(km === null ? "Distance cleared" : "Saved");
     return;
   }
@@ -1040,7 +1088,7 @@ async function onClick(ev) {
     try {
       await api.updateUser(patch);
       await loadMyProfile();
-      await loadSuggestions();
+      loadSuggestions();
       if (a === "save-note") toast("Saved");
       render();
     } catch (e) {
@@ -1131,7 +1179,7 @@ async function boot() {
   document.getElementById("photo-input").addEventListener("change", onPhotoPicked);
   render();
   await refresh();
-  if (me && getUser(me.id)) { await loadMyProfile(); await loadSuggestions(); }
+  if (me && getUser(me.id)) { await loadMyProfile(); loadSuggestions(); }
   render();
 
   /* cheap multiplayer: refetch when the tab regains focus and every 60s */

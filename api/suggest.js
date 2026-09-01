@@ -45,7 +45,7 @@ should load that knee.
 desc is two or three plain sentences telling them what to actually do, with sets,
 reps or times. No preamble, no motivational filler, no markdown.
 
-If they did something long or hard yesterday, make today deliberately easy -
+If yesterday was long, or they said it felt tough, make today deliberately easy -
 gentle movement, mobility, a walk - and say briefly that it is a recovery day.
 
 Stick to exercise. Do not give diet, weight-loss or medical advice, even if the
@@ -69,7 +69,8 @@ function profileLines(p, recent, dayNum, yesterday) {
     const bits = [prettyMinutes(yesterday.minutes)];
     if (yesterday.activity) bits.push(yesterday.activity);
     if (yesterday.distance_km) bits.push(`${Number(yesterday.distance_km)} km`);
-    lines.push(`Yesterday they did: ${bits.join(", ")}.`);
+    const felt = { easy: "easy", good: "about right", hard: "tough" }[yesterday.feeling];
+    lines.push(`Yesterday they did: ${bits.join(", ")}${felt ? `, and it felt ${felt}` : ""}.`);
   }
   lines.push(recent.length
     ? `Already done this month: ${recent.join(", ")}. Suggest something different where sensible.`
@@ -88,7 +89,7 @@ export default endpoint(async (req, res, userId) => {
   const p = rows[0];
   if (p.goals) p.goals = cleanGoals(p.goals).join(",");
 
-  const done = await sql`SELECT activity, minutes, distance_km FROM entries
+  const done = await sql`SELECT activity, minutes, distance_km, feeling FROM entries
                          WHERE user_id = ${userId} AND kind = 'exercise' AND done
                          ORDER BY date DESC LIMIT 8`;
   const recent = [...new Set(done.map(r => r.activity).filter(Boolean))];
@@ -97,7 +98,7 @@ export default endpoint(async (req, res, userId) => {
   /* Yesterday specifically: a long session there should make today easy. */
   const date = String(req.body?.date || "");
   const prev = /^\d{4}-\d{2}-\d{2}$/.test(date)
-    ? (await sql`SELECT activity, minutes, distance_km FROM entries
+    ? (await sql`SELECT activity, minutes, distance_km, feeling FROM entries
                  WHERE user_id = ${userId} AND kind = 'exercise' AND done
                    AND date = to_char(${date}::date - 1, 'YYYY-MM-DD')`)[0]
     : null;

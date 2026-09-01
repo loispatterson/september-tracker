@@ -15,7 +15,7 @@ export default endpoint(async (req, res) => {
     /* p.id only — NEVER p.data. This response is refetched every 60 seconds on
        phones; photo bytes belong in /api/photo, fetched once and cached. */
     sql`SELECT e.user_id, e.date, e.kind, e.done, e.activity, e.note,
-               e.minutes, e.distance_km, p.id AS photo_id
+               e.minutes, e.distance_km, e.feeling, p.id AS photo_id
         FROM entries e
         LEFT JOIN entry_photos p
           ON p.user_id = e.user_id AND p.date = e.date AND p.kind = e.kind

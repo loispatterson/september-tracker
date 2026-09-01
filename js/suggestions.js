@@ -29,10 +29,11 @@ const ALLOWED_INTENSITY = {
 /* Pure rule engine, and the fallback whenever the AI endpoint is unavailable.
    Scores by how many of the person's goals a workout serves, filtered to their
    age band and a sensible intensity for their fitness level. */
-/* A long day yesterday earns an easy day today. */
+/* A long day yesterday earns an easy day today — and so does a day that felt
+   tough, however short it was. */
 export const LONG_SESSION_MINUTES = 90;
-export function needsEasyDay(yesterdayMinutes) {
-  return Number(yesterdayMinutes) >= LONG_SESSION_MINUTES;
+export function needsEasyDay(yesterdayMinutes, yesterdayFeeling) {
+  return Number(yesterdayMinutes) >= LONG_SESSION_MINUTES || yesterdayFeeling === "hard";
 }
 
 export function pickWorkouts(profile, dateStr, recentActivities, library = WORKOUTS, opts = {}) {
@@ -42,7 +43,7 @@ export function pickWorkouts(profile, dateStr, recentActivities, library = WORKO
   const recent = (recentActivities || []).map(a => String(a).toLowerCase());
 
   /* After a 4-hour hike, don't propose intervals: keep today gentle. */
-  const easy = needsEasyDay(opts.yesterdayMinutes);
+  const easy = needsEasyDay(opts.yesterdayMinutes, opts.yesterdayFeeling);
   if (easy) intensities = intensities.includes("low") ? ["low"] : ["med"];
 
   const fits = w => w.ageBands.some(b => bands.includes(b));
@@ -79,23 +80,29 @@ export function pickWorkouts(profile, dateStr, recentActivities, library = WORKO
   return fresh.concat(stale).slice(0, 3);
 }
 
-/* The only function the UI calls. Asks Claude for something written for this
-   person; falls back to the built-in library if that is unavailable, fails, or
-   is simply not configured — so suggestions always appear. */
-let aiConfigured = true;   /* until the server tells us otherwise */
-
-export async function getSuggestions(profile, dateStr, recentActivities, opts = {}) {
-  if (aiConfigured) {
-    try {
-      const { workouts } = await api.suggest(dateStr);
-      if (workouts && workouts.length === 3) return workouts;
-    } catch (e) {
-      if (isAuthError(e)) throw e;      /* signed out: let the caller handle it */
-      /* 503 means no API key is set up: a settled fact for this page load, so
-         stop asking rather than failing a request on every render. */
-      if (e.status === 503) aiConfigured = false;
-      console.info("Using the built-in workout library:", e.message);
-    }
-  }
+/* Instant, local, always available. The app renders with these immediately —
+   a Claude call takes several seconds and must never hold up startup. */
+export function getSuggestions(profile, dateStr, recentActivities, opts = {}) {
   return pickWorkouts(profile, dateStr, recentActivities, WORKOUTS, opts);
+}
+
+/* The upgrade: workouts written for this person. Asked for only when someone
+   actually opens the suggestions, and swapped in when it arrives.
+   Returns null if unavailable, so the caller simply keeps the local ones. */
+let aiConfigured = true;   /* until the server tells us otherwise */
+export const aiAvailable = () => aiConfigured;
+
+export async function getAiSuggestions(dateStr) {
+  if (!aiConfigured) return null;
+  try {
+    const { workouts } = await api.suggest(dateStr);
+    return workouts && workouts.length === 3 ? workouts : null;
+  } catch (e) {
+    if (isAuthError(e)) throw e;      /* signed out: let the caller handle it */
+    /* 503 means no API key is configured: a settled fact for this page load,
+       so stop asking rather than failing a request every time. */
+    if (e.status === 503) aiConfigured = false;
+    console.info("Using the built-in workout library:", e.message);
+    return null;
+  }
 }

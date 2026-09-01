@@ -34,6 +34,8 @@ CREATE TABLE IF NOT EXISTS entries (
 ALTER TABLE entries ADD COLUMN IF NOT EXISTS minutes int;
 -- optional, and only meaningful for some activities: runs, walks, rides, swims
 ALTER TABLE entries ADD COLUMN IF NOT EXISTS distance_km numeric(6,2);
+-- how it felt: easy | good | hard. A hard day earns an easier one after it.
+ALTER TABLE entries ADD COLUMN IF NOT EXISTS feeling text;
 
 CREATE TABLE IF NOT EXISTS fun_ideas (
   id         serial PRIMARY KEY,

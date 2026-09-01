@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 /* same PIN/token rules as production, imported rather than reimplemented */
 import { hashPin, verifyPin, validPin, newToken, MAX_FAILS, LOCKOUT_MINUTES } from "../api/_lib/auth.js";
 import { validatePhoto, newPhotoId, stripDataUrl, b64Bytes } from "../api/_lib/photos.js";
-import { validAgeBand, cleanGoals, cleanNote, FITNESS } from "../api/_lib/profile.js";
+import { validAgeBand, cleanGoals, cleanNote, FITNESS, validFeeling } from "../api/_lib/profile.js";
 
 const ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..");
 const DATA = join(ROOT, "scripts", ".local-data.json");
@@ -262,6 +262,7 @@ async function apiRoute(req, res, path, q) {
     const dist = Number(logBody.distanceKm);
     const distance_km = Number.isFinite(dist) && dist > 0
       ? Math.min(999, Math.round(dist * 100) / 100) : null;
+    const feeling = validFeeling(logBody.feeling) ? logBody.feeling : null;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date || "") || date < "2026-09-01" || date > "2026-09-30")
       return send(res, 400, { error: "date must be in September 2026" });
     if (kind !== "exercise" && kind !== "fun") return send(res, 400, { error: "bad kind" });
@@ -273,7 +274,7 @@ async function apiRoute(req, res, path, q) {
     if (done !== null) {
       d.entries.push({ user_id: userId, date, kind, done: !!done,
         activity: activity ? String(activity).slice(0, 200) : null,
-        note: note ? String(note).slice(0, 500) : null, minutes, distance_km });
+        note: note ? String(note).slice(0, 500) : null, minutes, distance_km, feeling });
     }
     await put(d);
     return send(res, 200, { ok: true });

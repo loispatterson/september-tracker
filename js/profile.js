@@ -30,3 +30,8 @@ export function expandAgeBand(band) {
 }
 
 export const isLegacyBand = (b) => ["under30", "30-44", "45-59", "60plus"].includes(b);
+
+/* "How was it?" — three levels, with the labels the app shows. */
+export const FEELINGS = [
+  ["easy", "😊 Easy"], ["good", "💪 Just right"], ["hard", "😮‍💨 Tough"],
+];

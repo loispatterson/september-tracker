@@ -7,7 +7,7 @@ import { pickWorkouts, hashStr, needsEasyDay } from "./suggestions.js";
 import { expandAgeBand } from "./profile.js";
 import { WORKOUTS } from "./data/workouts.js";
 import { funPromptFor, funPool } from "./fun.js";
-import { buildLogs, minutesOf, prettyMinutes, describeEntry, totalMinutes } from "./logs.js";
+import { buildLogs, minutesOf, prettyMinutes, describeEntry, totalMinutes, feelingLabel } from "./logs.js";
 import { readExifOrientation, orientationTransform, fitDimensions, galleryItems } from "./imageutil.js";
 
 export function runSelfTests() {
@@ -144,10 +144,23 @@ export function runSelfTests() {
   check("monthly total counts only your own exercise", totalMinutes(timeEntries, "u_1"), 270);
   check("total for someone with nothing", totalMinutes(timeEntries, "u_9"), 0);
 
-  /* ---- an easy day after a long one ---- */
+  /* ---- how it felt ---- */
+  check("feeling labels", [feelingLabel("easy"), feelingLabel("good"), feelingLabel("hard")],
+    ["easy", "just right", "tough"]);
+  check("no feeling, no label", feelingLabel(null), "");
+  check("unknown feeling, no label", feelingLabel("terrible"), "");
+
+  /* ---- an easy day after a long or tough one ---- */
   check("90 minutes triggers an easy day", [needsEasyDay(89), needsEasyDay(90), needsEasyDay(240)],
     [false, true, true]);
   check("no session yesterday is not an easy day", needsEasyDay(0), false);
+  check("a short but tough session also earns an easy day", needsEasyDay(30, "hard"), true);
+  check("a short session that felt fine does not", needsEasyDay(30, "good"), false);
+  check("an easy short session does not", needsEasyDay(30, "easy"), false);
+  check("tough yesterday keeps today gentle",
+    pickWorkouts({ id: U, ageBand: "30-34", goals: ["cardio"], fitness: "veryactive" },
+      "2026-09-11", [], WORKOUTS, { yesterdayMinutes: 30, yesterdayFeeling: "hard" })
+      .every(w => w.intensity !== "high"), true);
   const active = { id: U, ageBand: "30-34", goals: ["cardio"], fitness: "veryactive" };
   check("a 4-hour hike makes today gentle",
     pickWorkouts(active, "2026-09-10", [], WORKOUTS, { yesterdayMinutes: 240 })
