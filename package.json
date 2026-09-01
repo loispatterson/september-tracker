@@ -1,0 +1,16 @@
+{
+  "name": "september-tracker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Shared September 2026 tracker: 30 min of exercise + one fun thing, every day.",
+  "type": "module",
+  "scripts": {
+    "dev": "vercel dev",
+    "dev:local": "node scripts/dev-server.mjs",
+    "db:init": "node scripts/init-db.mjs",
+    "test": "node scripts/run-tests.mjs"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^0.10.4"
+  }
+}
