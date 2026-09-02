@@ -590,7 +590,9 @@ function cellPanel(u, ds, today) {
   return `<div class="panel">
     <b>${esc(prettyDate(ds))}</b>
     ${lines.map(l => `<div class="small">${l}</div>`).join("")}
-    ${fun && fun.photo_id && !(editable && ui.photoDraft && ui.photoDraft.date === ds)
+    ${/* On your own days the editor below draws the photo, with Replace and
+          Remove beside it — drawing it here too showed it twice. */
+      !editable && fun && fun.photo_id
       ? `<img class="panel-photo" data-photo="${esc(fun.photo_id)}"
           data-action="photo-open" data-photo-id="${esc(fun.photo_id)}"
           data-id="${esc(u.id)}" data-date="${ds}" alt="Photo from ${esc(u.name)}">` : ""}
@@ -1196,7 +1198,8 @@ async function onPhotoPicked(ev) {
   ui.photoBusy = true; ui.photoError = ""; render();
   try {
     const draft = await prepareUpload(file);
-    draft.date = ui.photoTarget || todayStr();
+    /* The day the picker was opened for; the day on screen otherwise. */
+    draft.date = ui.photoTarget || viewDate();
     ui.photoDraft = draft;
   } catch (e) {
     console.error(e);
