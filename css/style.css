@@ -79,6 +79,13 @@ header.app {
   justify-content: space-between;
 }
 
+.daynav {
+  display: flex; align-items: center; justify-content: center; gap: 14px;
+  margin: 0 0 10px;
+}
+.daynav span { font-weight: 600; }
+.daynav .btn[disabled] { opacity: 0.3; }
+
 /* ---------- cards ---------- */
 .card {
   background: var(--surface);

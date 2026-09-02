@@ -25,6 +25,7 @@ let aiAsked = false, aiBusy = false;
 /* ephemeral UI state — never persisted */
 const ui = {
   tab: "today",
+  viewDate: null,                 /* the day the Today tab is showing; null = today */
   needPasscode: false,
   offline: false,                 /* board unreachable — show a real message */
   onboardStep: "who",             /* who | new | pin */
@@ -81,6 +82,16 @@ async function loadMyProfile() {
   catch (e) { if (isAuthError(e)) return signedOut(); myPrivate = null; }
 }
 function entryFor(log, ds, userId) { return (log[ds] && log[ds][userId]) || null; }
+
+/* The day the Today tab is showing. Clamped into September and never ahead of
+   today, so you can catch up on a day you missed but not log the future. */
+function viewDate() {
+  const t = todayStr();
+  const d = ui.viewDate || t;
+  if (d < SEPT_START) return SEPT_START;
+  if (d > t || d > SEPT_END) return t <= SEPT_END ? t : SEPT_END;
+  return d;
+}
 
 const MINUTE_OPTIONS = [30, 45, 60, 90];
 
@@ -252,7 +263,8 @@ function renderOnboard() {
 
 /* ---------- today ---------- */
 function renderToday() {
-  const today = todayStr();
+  const today = viewDate();
+  const realToday = todayStr();
   const p = myProfile();
   if (!p) return "";
   const inSept = today >= SEPT_START && today <= SEPT_END;
@@ -378,7 +390,18 @@ function renderToday() {
     </div>`;
   }).join("");
 
+  const canGoBack = today > SEPT_START;
+  const canGoForward = today < realToday;
+  const dayNav = `<div class="daynav">
+      <button class="btn small ghost" data-action="day-back" ${canGoBack ? "" : "disabled"}>←</button>
+      <span>${today === realToday ? "Today" : esc(prettyDate(today))}</span>
+      <button class="btn small ghost" data-action="day-forward" ${canGoForward ? "" : "disabled"}>→</button>
+    </div>
+    ${today !== realToday ? `<p class="small muted">Catching up on ${esc(prettyDate(today))}.
+      <button class="btn ghost small" data-action="day-today">Back to today</button></p>` : ""}`;
+
   return `
+    ${dayNav}
     <div class="card">
       <h2>💪 30 minutes of exercise</h2>
       ${exHtml}
@@ -744,7 +767,18 @@ async function onClick(ev) {
   const el = ev.target.closest("[data-action]");
   if (!el) return;
   const a = el.dataset.action;
-  const today = todayStr();
+  const today = viewDate();          /* log against the day being shown */
+
+  if (a === "day-back" || a === "day-forward" || a === "day-today") {
+    const cur = viewDate();
+    ui.viewDate = a === "day-today" ? null
+      : addDays(cur, a === "day-back" ? -1 : 1);
+    /* Leaving a half-finished entry behind on another day would be confusing. */
+    ui.exOther = false; ui.funOwn = false; ui.customMinutes = false;
+    clearDraft();
+    render();
+    return;
+  }
 
   if (a === "tab") {
     ui.tab = el.dataset.tab;

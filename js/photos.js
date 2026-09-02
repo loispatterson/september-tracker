@@ -3,8 +3,12 @@
 import { readExifOrientation, orientationTransform, fitDimensions } from "./imageutil.js";
 import { fetchPhotoBlob } from "./api.js";
 
-const MAX_EDGE = 1200;
-const TARGET_BYTES = 300_000;
+/* Sized for looking at on a phone, not for printing. 1000px still fills a
+   lightbox on a high-density screen, and roughly a third smaller than 1200
+   across a month of photos in a 0.5 GB database. */
+const MAX_EDGE = 1000;
+const TARGET_BYTES = 150_000;
+const START_QUALITY = 0.68;
 
 /* A 2x1 JPEG whose EXIF Orientation is 6. A browser that honours EXIF decodes
    it as 1x2. Browsers have applied orientation automatically since ~2020, so
@@ -67,16 +71,16 @@ export async function prepareUpload(file, maxEdge = MAX_EDGE) {
     if (!srcW || !srcH) throw decodeError();
 
     let { w, h } = fitDimensions(srcW, srcH, maxEdge);
-    let blob = await render(img, o, w, h, 0.75);
+    let blob = await render(img, o, w, h, START_QUALITY);
 
     /* Ladder down on quality, then on size, rather than uploading something huge */
-    let q = 0.75;
+    let q = START_QUALITY;
     while (blob.size > TARGET_BYTES && q > 0.45) {
-      q -= 0.12;
+      q -= 0.08;
       blob = await render(img, o, w, h, q);
     }
     if (blob.size > TARGET_BYTES) {
-      ({ w, h } = fitDimensions(srcW, srcH, 900));
+      ({ w, h } = fitDimensions(srcW, srcH, 800));
       blob = await render(img, o, w, h, 0.6);
     }
 
