@@ -28,6 +28,8 @@ const ui = {
   viewDate: null,                 /* the day the Today tab is showing; null = today */
   needPasscode: false,
   offline: false,                 /* board unreachable — show a real message */
+  splashDone: false,              /* demo: visitor has chosen from the splash */
+  demoBusy: false,
   onboardStep: "who",             /* who | new | pin */
   claiming: null,                 /* user being claimed, awaiting their PIN */
   draft: { name: "", emoji: "💪", ageBand: "", goals: [], fitness: "", note: "", pin: "" },
@@ -61,6 +63,9 @@ function toast(msg) {
   toast._t = setTimeout(() => el.classList.remove("show"), 2200);
 }
 function getUser(id) { return board.users.find(u => u.id === id); }
+/* True on the public demo deployment, where there is no passcode and anyone
+   can take a look. Assumed false until the board says otherwise. */
+function isDemo() { return board.demo === true || window.DEMO_SPLASH === true; }
 /* The private half of your own profile, from /api/me — the board deliberately
    doesn't carry age, goals, fitness level or notes for anyone. */
 let myPrivate = null;
@@ -170,6 +175,32 @@ function signedOut() {
 }
 
 /* ---------- onboarding ---------- */
+
+/* The demo deployment opens on this: say what the thing is before asking
+   anyone to do anything. Rendered from the first paint, so it is on screen
+   while the board is still loading. */
+function renderSplash() {
+  return `<div class="onboard splash">
+    <h2>September Tracker</h2>
+    <p>30 minutes of exercise and one fun thing, every day of September,
+       tracked with your friends on a shared board.</p>
+    <ul class="splash-list">
+      <li>💪 Log what you did, how long it took and how it felt</li>
+      <li>🎉 A different fun idea every day, or bring your own</li>
+      <li>📸 Add a photo, and a gallery builds up over the month</li>
+      <li>🔥 Streaks for exercise, fun and photos</li>
+      <li>🤖 Workout suggestions tuned to your age, goals and fitness</li>
+    </ul>
+    <button class="btn primary big" data-action="demo-login" ${ui.demoBusy ? "disabled" : ""}>
+      ${ui.demoBusy ? "Setting up…" : "Have a look around"}</button>
+    <p class="small muted">Opens a throwaway account with a few days already
+      filled in. Nothing you do here affects anyone else.</p>
+    <button class="btn big" data-action="splash-signup">Create an account</button>
+    <p class="small muted">This is a public demo, so please don't put anything
+      private in it. The real thing lives on a private board.</p>
+  </div>`;
+}
+
 function renderOnboard() {
   if (ui.offline) {
     return `<div class="onboard">
@@ -711,6 +742,15 @@ function render() {
   const n = septDayNum(today);
   dayEl.textContent = n ? `${prettyDate(today)} · day ${n}/30` : prettyDate(today);
 
+  /* Demo: the splash replaces the bare "Loading…" and stays until the visitor
+     picks a door. isDemo is only known once the board answers, so a first
+     paint before that still shows the loading line. */
+  if (isDemo() && !ui.splashDone && (!me || !getUser(me.id))) {
+    show("view-onboard", renderSplash());
+    tabs.classList.add("hidden");
+    return;
+  }
+
   if (ui.loading) { show("view-onboard", `<div class="onboard"><p class="muted">Loading…</p></div>`); tabs.classList.add("hidden"); return; }
 
   if (ui.offline || ui.needPasscode || !me || !getUser(me.id)) {
@@ -865,6 +905,34 @@ async function onClick(ev) {
   if (a === "gallery-filter") { ui.galleryUser = el.dataset.id || null; render(); return; }
 
   if (a === "undo-fun-cancel") { ui.confirmFunClear = null; render(); return; }
+
+  if (a === "splash-signup") {
+    ui.splashDone = true;
+    ui.onboardStep = "new";
+    render();
+    return;
+  }
+
+  if (a === "demo-login") {
+    ui.demoBusy = true; render();
+    try {
+      const { id, name, token } = await api.demoLogin();
+      setToken(token);
+      me = { id, name };
+      localStorage.setItem(ME_KEY, JSON.stringify(me));
+      ui.splashDone = true;
+      await refresh();
+      await loadMyProfile();
+      loadSuggestions();
+      toast(`You're ${name} — have a poke around`);
+    } catch (e) {
+      toast(errorMessage(e) || "Couldn't start the demo");
+    } finally {
+      ui.demoBusy = false;
+      render();
+    }
+    return;
+  }
 
   if (a === "retry") {
     ui.loading = true; render();

@@ -64,14 +64,21 @@ async function apiRoute(req, res, path, q) {
   const needAuth = () => { send(res, 401, { error: "auth" }); return true; };
 
   if (path === "/api/board" && req.method === "GET") {
+    /* demo: hide everyone else's throwaway guest account — see api/board.js */
+    const viewer = d.sessions[req.headers["x-user-token"]] || null;
+    const visible = process.env.DEMO_MODE === "1"
+      ? d.users.filter(u => !/^Guest \d+$/.test(u.name) || u.id === viewer)
+      : d.users;
+    const ids = new Set(visible.map(u => u.id));
     return send(res, 200, {
       /* name + avatar only — profile fields are private, see /api/me */
-      users: d.users.map(u => ({
+      users: visible.map(u => ({
         id: u.id, name: u.name, emoji: u.emoji, joined: u.joined,
         has_pin: !!u.pin_hash,
       })),
       /* photo_id only, never the bytes — see api/board.js */
       entries: d.entries
+        .filter(e => ids.has(e.user_id))
         .filter(e => e.date >= "2026-09-01" && e.date <= "2026-09-30")
         .map(e => ({
           ...e,
@@ -79,6 +86,7 @@ async function apiRoute(req, res, path, q) {
         })),
       funIdeas: d.funIdeas,
       build: "dev",
+      demo: process.env.DEMO_MODE === "1",
     });
   }
 
@@ -152,6 +160,42 @@ async function apiRoute(req, res, path, q) {
     d.sessions[t] = id;
     await put(d);
     return send(res, 200, { id, token: t });
+  }
+
+  if (path === "/api/demo" && req.method === "POST") {
+    if (process.env.DEMO_MODE !== "1") return send(res, 404, { error: "not found" });
+    const n = Math.floor(Math.random() * 9000) + 1000;
+    const id = "u_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const name = `Guest ${n}`;
+    const now = new Date();
+    const iso = (d) => d.toISOString().slice(0, 10);
+    const acts = ["Run", "Walk", "Yoga", "Cycle", "Swim", "Gym"];
+    const feels = ["easy", "good", "good", "hard"];
+    const seeded = [];
+    for (let back = 1; back <= 6; back++) {
+      if (back === 3) continue;
+      const dd = new Date(now); dd.setDate(dd.getDate() - back);
+      const ds = iso(dd);
+      if (ds < "2026-09-01" || ds > "2026-09-30") continue;
+      seeded.push(ds);
+      d.entries.push({ user_id: id, date: ds, kind: "exercise", done: true,
+        activity: acts[back % acts.length], note: null,
+        minutes: 30 + (back % 3) * 15, distance_km: null, feeling: feels[back % feels.length] });
+      if (back % 2 === 1) {
+        d.entries.push({ user_id: id, date: ds, kind: "fun", done: true,
+          activity: "Took a photo walk", note: null, minutes: null, distance_km: null, feeling: null });
+      }
+    }
+    /* backdate to the earliest seeded day so the gap reads as a miss */
+    const joined = seeded.length ? seeded[seeded.length - 1] : iso(now);
+    d.users.push({ id, name, emoji: "🙂", age_band: "40-44", goal: "general",
+      goals: "weightloss,strength", fitness: "occasional",
+      note: "Just having a look around", joined,
+      pin_hash: hashPin("0000"), pin_fails: 0, pin_locked_until: null });
+    const t = newToken();
+    d.sessions[t] = id;
+    await put(d);
+    return send(res, 200, { id, name, token: t });
   }
 
   if (path === "/api/claim" && req.method === "POST") {

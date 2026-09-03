@@ -283,6 +283,13 @@ input[type="text"], textarea {
 .field { text-align: left; margin: 12px 0; }
 .field label { display: block; font-size: 13px; color: var(--ink-2); margin-bottom: 4px; }
 
+.splash { padding-top: 4vh; }
+.splash h2 { font-size: 22px; text-transform: none; letter-spacing: 0; color: var(--ink); }
+.splash > p { color: var(--ink-2); }
+.splash-list { list-style: none; padding: 0; margin: 18px 0; text-align: left; }
+.splash-list li { padding: 5px 0; font-size: 15px; }
+.splash .btn.big { margin-top: 4px; }
+
 /* ---------- tab bar ---------- */
 nav.tabs {
   position: fixed;

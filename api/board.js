@@ -1,4 +1,15 @@
-import { sql, endpoint } from "./_lib/db.js";
+import { sql, endpoint, sessionUser } from "./_lib/db.js";
+
+/* On the public demo every visitor is issued their own throwaway account, so
+   without this the board would grow a row per person who ever clicked the
+   link. Each visitor sees the example people plus themselves. */
+const isGuest = (name) => /^Guest \d+$/.test(name);
+async function hideOtherGuests(req, users, entries) {
+  const viewer = await sessionUser(req);
+  const keep = users.filter((u) => !isGuest(u.name) || u.id === viewer);
+  const ids = new Set(keep.map((u) => u.id));
+  return [keep, entries.filter((e) => ids.has(e.user_id))];
+}
 
 /* GET /api/board → { users, entries, funIdeas } — everything the app renders. */
 export default endpoint(async (req, res) => {
@@ -28,5 +39,9 @@ export default endpoint(async (req, res) => {
     || process.env.VERCEL_GIT_COMMIT_SHA
     || process.env.VERCEL_URL
     || "dev";
-  res.status(200).json({ users, entries, funIdeas, build });
+  const demo = process.env.DEMO_MODE === "1";
+  const [shownUsers, shownEntries] = demo
+    ? await hideOtherGuests(req, users, entries)
+    : [users, entries];
+  res.status(200).json({ users: shownUsers, entries: shownEntries, funIdeas, build, demo });
 });

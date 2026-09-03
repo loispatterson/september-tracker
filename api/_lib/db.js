@@ -25,7 +25,7 @@ function passcodeOk(req) {
 
 /* Who is this request? Resolved from the session token, never from the body —
    that's what stops one person writing to another's grid. */
-async function sessionUser(req) {
+export async function sessionUser(req) {
   const token = req.headers["x-user-token"];
   if (!token || typeof token !== "string") return null;
   const rows = await sql`SELECT user_id FROM sessions WHERE token = ${token}`;

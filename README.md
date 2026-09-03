@@ -77,3 +77,35 @@ Design notes worth knowing:
 ### Phase 2: AI suggestions
 
 `getSuggestions()` in `js/suggestions.js` is already async and is the only function the UI calls. To upgrade, change its body to `fetch("/api/suggest")`, add that function calling the Anthropic API with an `ANTHROPIC_API_KEY` env var, and keep `pickWorkouts()` as the offline fallback. Nothing in the UI needs to change.
+
+## Public demo
+
+`https://september-tracker-demo.vercel.app` is a separate Vercel project running
+this same code against a separate Neon database (`septdemo`), with
+`DEMO_MODE=1` and no `BOARD_PASSCODE`. It exists so the app can be linked
+publicly without exposing the real board.
+
+`DEMO_MODE=1` changes three things and nothing else:
+
+- `POST /api/demo` starts answering. Elsewhere it is a 404.
+- Each visitor gets their own throwaway `Guest NNNN` account with a couple of
+  days already logged, so the board is never empty. Guests idle for two days
+  are deleted on the next visit.
+- `/api/board` hides everyone else's guest account, so a visitor sees the two
+  example people plus themselves rather than a row per person who ever
+  clicked the link.
+
+To refresh the example people (Ada and Sam):
+
+    DATABASE_URL='<septdemo url>' node scripts/seed-demo.mjs
+
+Deploying the demo means relinking the directory, so put it back afterwards:
+
+    cp .vercel/project.json /tmp/main.json
+    vercel link --yes --project september-tracker-demo
+    vercel deploy --prod --yes
+    cp /tmp/main.json .vercel/project.json
+
+The demo has no `ANTHROPIC_API_KEY`, so suggestions come from the built-in
+library rather than Claude. Adding the key would turn AI suggestions on, but
+it also puts a paid API call behind a public link.
