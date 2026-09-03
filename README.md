@@ -99,6 +99,20 @@ To refresh the example people (Ada and Sam):
 
     DATABASE_URL='<septdemo url>' node scripts/seed-demo.mjs
 
+Their history is written relative to today, so re-running it any day in
+September brings them up to date rather than leaving them looking like they
+gave up in week one. Worth re-running every few days while the demo is being
+shared.
+
+The gallery images in `scripts/demo-photos/` are drawn, not photographed: the
+demo is public, so it can't show anyone's real pictures. To change them, edit
+the scenes in `scripts/demo-photos.mjs`, re-render, then re-seed:
+
+    PLAYWRIGHT_CORE=<path to playwright-core> node scripts/demo-photos.mjs
+
+The photo id embeds a hash of the image bytes, so a redrawn scene gets a new
+id and bypasses the immutable cache `/api/photo` sets on photo bytes.
+
 Deploying the demo means relinking the directory, so put it back afterwards:
 
     cp .vercel/project.json /tmp/main.json
