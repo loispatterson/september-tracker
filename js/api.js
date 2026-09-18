@@ -48,6 +48,7 @@ export const api = {
   addFunIdea: (text) => post("/api/fun-ideas", { text }),
   uploadPhoto: (photo) => post("/api/photo", photo),
   deletePhoto: (date) => request(`/api/photo?date=${encodeURIComponent(date)}`, { method: "DELETE" }),
+  toggleLike: (photoId) => post("/api/like", { photoId }),
 };
 
 /* Photo bytes come back as a blob, not JSON, and the passcode travels in a

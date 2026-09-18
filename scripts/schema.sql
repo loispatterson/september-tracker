@@ -68,3 +68,22 @@ CREATE TABLE IF NOT EXISTS entry_photos (
   UNIQUE (user_id, date, kind),
   FOREIGN KEY (user_id, date, kind) REFERENCES entries (user_id, date, kind) ON DELETE CASCADE
 );
+
+-- Likes on fun-day photos. One row per person per photo, so the primary key
+-- is the whole vote and liking twice is impossible without a counter to keep
+-- in step.
+--
+-- The cascade is deliberate. entry_photos.id is regenerated on every upload,
+-- replacements included, so swapping your photo for a different one drops its
+-- likes: they were for the old picture, and silently carrying them over would
+-- credit the new one with applause it never got.
+CREATE TABLE IF NOT EXISTS photo_likes (
+  photo_id   text NOT NULL REFERENCES entry_photos(id) ON DELETE CASCADE,
+  user_id    text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at timestamptz DEFAULT now(),
+  PRIMARY KEY (photo_id, user_id)
+);
+
+-- The board counts likes per photo on every refresh, which is the only read
+-- that isn't by primary key.
+CREATE INDEX IF NOT EXISTS photo_likes_photo ON photo_likes (photo_id);

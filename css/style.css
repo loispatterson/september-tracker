@@ -223,14 +223,22 @@ input[type="text"], textarea {
   grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
   gap: 4px;
 }
+/* The tile is a wrapper, not a control: it holds two buttons, the image and
+   the like. A button inside a button is invalid and browsers drop the inner
+   one, which is why these are siblings. */
 .gtile {
   position: relative;
   aspect-ratio: 1;
-  padding: 0;
-  border: 0;
   border-radius: 8px;
   overflow: hidden;
   background: var(--cell-off);
+}
+.gopen {
+  display: block;
+  width: 100%; height: 100%;
+  padding: 0; border: 0;
+  background: none;
+  cursor: pointer;
 }
 .gtile img { width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 0.2s; }
 .gtile img.ready { opacity: 1; }
@@ -254,6 +262,35 @@ input[type="text"], textarea {
 }
 .lightbox img { max-width: 100%; max-height: 78vh; border-radius: 10px; }
 .lightbox .cap { color: #fff; font-size: 14px; text-align: center; }
+.lb-actions { display: flex; align-items: center; gap: 12px; }
+
+/* ---- likes ---- */
+/* 34px square is the smallest comfortable thumb target, and the tiles are
+   only ~104px wide, so it cannot grow much beyond that. */
+.like {
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  min-width: 34px; height: 30px;
+  padding: 0 8px;
+  border: 0; border-radius: 15px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff; font-size: 13px; font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
+}
+.gtile .like { position: absolute; right: 4px; bottom: 4px; z-index: 1; }
+.like .heart { font-size: 14px; line-height: 1; transition: transform 0.15s ease; }
+.like.on .heart { transform: scale(1.15); }
+.like:disabled { opacity: 0.45; cursor: default; }
+.like:focus-visible { outline: 2px solid var(--accent, #2a78d6); outline-offset: 2px; }
+.like.big { height: 38px; min-width: 52px; font-size: 15px; padding: 0 14px; }
+.like.big .heart { font-size: 18px; }
+@media (prefers-reduced-motion: reduce) {
+  .like .heart { transition: none; }
+}
+
+/* ---- board ranking ---- */
+.medal { font-size: 15px; margin-left: auto; }
+.board-user.leader { box-shadow: inset 3px 0 0 var(--accent, #2a78d6); }
 
 .panel-photo {
   width: 100%; max-height: 220px; object-fit: cover;

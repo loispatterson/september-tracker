@@ -504,6 +504,25 @@ function photoStreakLine(ds) {
   return "";
 }
 
+/* One like control, used by the gallery tiles and the lightbox.
+
+   It is its own <button>, never nested inside the tile button, because a
+   button inside a button is invalid HTML and browsers recover from it by
+   dropping the inner one. That is why the tile below is a <div> wrapping two
+   buttons rather than one big button. */
+function likeButton(item, { big = false } = {}) {
+  if (!item || !item.photoId) return "";
+  const n = item.likes || 0;
+  const on = item.likedByMe;
+  const label = on ? "Remove your like" : "Like this photo";
+  return `<button class="like${on ? " on" : ""}${big ? " big" : ""}"
+    data-action="like" data-photo-id="${esc(item.photoId)}"
+    aria-pressed="${on}" aria-label="${label}" title="${label}"
+    ${me ? "" : "disabled"}>
+    <span class="heart">${on ? "❤️" : "🤍"}</span>${n ? `<span class="n">${n}</span>` : ""}
+  </button>`;
+}
+
 function renderGallery() {
   const all = galleryItems(board.entries, board.users);
   const photographers = board.users.filter(u => all.some(i => i.userId === u.id));
@@ -533,21 +552,32 @@ function renderGallery() {
   }
 
   return header + `<div class="gallery">${items.map(i => `
-    <button class="gtile" data-action="photo-open" data-photo-id="${esc(i.photoId)}"
-            data-id="${esc(i.userId)}" data-date="${i.date}">
-      <img data-photo="${esc(i.photoId)}" alt="${esc(i.name)}, ${esc(prettyDate(i.date))}">
-      <span class="gcap">${i.emoji} ${septDayNum(i.date)}</span>
-    </button>`).join("")}</div>`;
+    <div class="gtile">
+      <button class="gopen" data-action="photo-open" data-photo-id="${esc(i.photoId)}"
+              data-id="${esc(i.userId)}" data-date="${i.date}">
+        <img data-photo="${esc(i.photoId)}" alt="${esc(i.name)}, ${esc(prettyDate(i.date))}">
+        <span class="gcap">${i.emoji} ${septDayNum(i.date)}</span>
+      </button>
+      ${likeButton(i)}
+    </div>`).join("")}</div>`;
 }
 
 function renderLightbox() {
   const lb = ui.lightbox;
   if (!lb) return "";
+  /* Read the counts off the board rather than off the stored lightbox state,
+     so a like registered here or by someone else on the next refresh shows
+     without having to reopen the photo. */
+  const live = galleryItems(board.entries, board.users)
+    .find(i => i.photoId === lb.photoId) || lb;
   return `<div class="lightbox" data-action="photo-close">
     <img data-photo="${esc(lb.photoId)}" alt="">
     <div class="cap">${lb.emoji} ${esc(lb.name)} · ${esc(prettyDate(lb.date))}${
       lb.activity ? " · " + esc(lb.activity) : ""}</div>
-    <button class="btn" data-action="photo-close">Close</button>
+    <div class="lb-actions">
+      ${likeButton(live, { big: true })}
+      <button class="btn" data-action="photo-close">Close</button>
+    </div>
   </div>`;
 }
 
@@ -568,13 +598,40 @@ function cellClass(userId, ds, today, since) {
   return "";
 }
 
+/* Most logged days first, so the board reads as a summary rather than a
+   join-order list. Ties break on the current streak, then the best streak,
+   then name, which keeps the order stable between refreshes instead of
+   letting two people on the same count swap places every 60 seconds.
+
+   Note this ranks on days logged, not on rate: someone who joined on the 20th
+   sits below someone who joined on the 1st with the same habit. That is the
+   honest reading of "most logged days" and the grid underneath shows the join
+   date, so nobody is being misrepresented. */
+function boardOrder(today) {
+  return board.users
+    .map(u => {
+      const since = joinedOf(u);
+      return {
+        u, since,
+        total: totalHits(u.id, exLog, today, since),
+        cur: currentStreak(u.id, exLog, today, since),
+        best: bestStreak(u.id, exLog, today, since),
+      };
+    })
+    .sort((a, b) =>
+      b.total - a.total ||
+      b.cur - a.cur ||
+      b.best - a.best ||
+      a.u.name.localeCompare(b.u.name));
+}
+
 function renderBoard() {
   const today = todayStr();
   const dates = septDates();
   if (!board.users.length) return `<div class="card"><p class="muted">Nobody's joined yet.</p></div>`;
 
-  return board.users.map(u => {
-    const since = joinedOf(u);
+  const ranked = boardOrder(today);
+  return ranked.map(({ u, since, total: tot, cur, best }, i) => {
     const cells = dates.map(ds => {
       const fun = entryFor(funLog, ds, u.id);
       const hasPhoto = !!(photoLog[ds] && photoLog[ds][u.id]);
@@ -583,16 +640,18 @@ function renderBoard() {
           ? `<span class="fun-dot${hasPhoto ? " photo" : ""}"></span>` : ""}
       </button>`;
     }).join("");
-    const cur = currentStreak(u.id, exLog, today, since);
-    const best = bestStreak(u.id, exLog, today, since);
-    const tot = totalHits(u.id, exLog, today, since);
     const funStreak = currentStreak(u.id, funLog, today, since);
     const photoStreak = currentStreak(u.id, photoLog, today, since);
     const panel = ui.cell && ui.cell.userId === u.id ? cellPanel(u, ui.cell.date, today) : "";
-    return `<div class="card board-user">
+    /* Only worth a medal if there is somebody to be ahead of, and only when
+       days have actually been logged. A 🥇 for nought out of thirty on the
+       first of the month would be a joke at the winner's expense. */
+    const medal = tot > 0 && ranked.length > 1 ? ["🥇", "🥈", "🥉"][i] || "" : "";
+    return `<div class="card board-user${i === 0 && medal ? " leader" : ""}">
       <div class="board-head">
         <span>${u.emoji}</span>
         <b>${esc(u.name)}</b>
+        ${medal ? `<span class="medal" title="${tot} day${tot === 1 ? "" : "s"} logged">${medal}</span>` : ""}
       </div>
       <div class="streaks">
         <span class="stats">🔥 ${cur} · best ${best} · ${tot}/30</span>
@@ -901,6 +960,37 @@ async function onClick(ev) {
   }
 
   if (a === "photo-close") { ui.lightbox = null; render(); return; }
+
+  if (a === "like") {
+    /* Inside the lightbox the backdrop closes the photo, so a like tap must
+       not bubble up and shut it. Same on a gallery tile, where the wrapper
+       opens the picture. */
+    ev.stopPropagation();
+    if (!me) { toast("Join first to like photos"); return; }
+    const photoId = el.dataset.photoId;
+    const row = board.entries.find(e => e.photo_id === photoId);
+    if (!row) return;
+
+    /* Optimistic: a like should feel instant on a phone. The server is the
+       authority on the count, so its reply overwrites this either way, and a
+       failure puts back exactly what was there before. */
+    const before = { likes: Number(row.likes) || 0, liked: !!row.liked_by_me };
+    row.liked_by_me = !before.liked;
+    row.likes = before.likes + (before.liked ? -1 : 1);
+    render();
+
+    try {
+      const { liked, count } = await api.toggleLike(photoId);
+      row.liked_by_me = liked;
+      row.likes = count;
+    } catch (e) {
+      row.liked_by_me = before.liked;
+      row.likes = before.likes;
+      toast(isAuthError(e) ? "Sign in again to like photos" : errorMessage(e));
+    }
+    render();
+    return;
+  }
 
   if (a === "gallery-filter") { ui.galleryUser = el.dataset.id || null; render(); return; }
 
