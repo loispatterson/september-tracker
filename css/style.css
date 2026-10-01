@@ -467,3 +467,16 @@ nav.tabs button.on { color: var(--accent); font-weight: 600; }
   background: var(--surface); color: var(--ink); border-color: var(--border);
 }
 .thread-inline .cmt-add input::placeholder { color: var(--muted); }
+
+/* Comment badge on a gallery tile. Top-left, opposite the like button in the
+   bottom-right, so the two never collide on a ~104px tile. */
+.gcmt {
+  position: absolute; top: 4px; left: 4px;
+  font-size: 11px; line-height: 1; font-variant-numeric: tabular-nums;
+  padding: 3px 5px; border-radius: 99px;
+  background: rgba(0,0,0,0.6); color: #fff;
+  backdrop-filter: blur(2px);
+}
+/* A day with comments on it. Ringed rather than recoloured, so it reads as
+   "there is more here" without competing with the fun and photo states. */
+.cell .fun-dot.talked { box-shadow: 0 0 0 2px var(--accent); }

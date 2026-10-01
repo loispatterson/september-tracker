@@ -598,6 +598,11 @@ function renderGallery() {
               data-id="${esc(i.userId)}" data-date="${i.date}">
         <img data-photo="${esc(i.photoId)}" alt="${esc(i.name)}, ${esc(prettyDate(i.date))}">
         <span class="gcap">${i.emoji} ${monthDayNum(i.date, i.date)}</span>
+        ${/* A thread is invisible until you open the photo, so nobody goes
+              looking. The badge is the only cue that there is anything to
+              read. */
+          i.comments ? `<span class="gcmt" aria-label="${i.comments} comment${
+            i.comments === 1 ? "" : "s"}">💬 ${i.comments}</span>` : ""}
       </button>
       ${likeButton(i)}
     </div>`).join("")}</div>`;
@@ -746,7 +751,8 @@ function renderBoard() {
       const hasPhoto = !!(photoLog[ds] && photoLog[ds][u.id]);
       return `<button class="cell ${cellClass(u.id, ds, today, since, month + "-01")}" data-action="cell" data-id="${u.id}" data-date="${ds}">
         ${monthDayNum(ds, ds)}${fun && fun.done
-          ? `<span class="fun-dot${hasPhoto ? " photo" : ""}"></span>` : ""}
+          ? `<span class="fun-dot${hasPhoto ? " photo" : ""}${
+              Number(fun.comments) ? " talked" : ""}"></span>` : ""}
       </button>`;
     }).join("");
     const funStreak = currentStreak(u.id, funLog, today, since, month + "-01");
