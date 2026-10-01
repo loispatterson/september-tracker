@@ -37,6 +37,13 @@ export function monthEnd(ds = todayStr()) {
 export function monthLength(ds = todayStr()) { return Number(monthEnd(ds).slice(8)); }
 export function monthName(ds = todayStr()) { return MONTH_FULL[Number(ds.slice(5, 7)) - 1]; }
 
+/* Step a 'YYYY-MM' back or forward. */
+export function shiftMonth(ym, n) {
+  const [y, m] = ym.split("-").map(Number);
+  const d = new Date(y, m - 1 + n, 1);
+  return d.getFullYear() + "-" + pad2(d.getMonth() + 1);
+}
+
 export function monthDates(ds = todayStr()) {
   const out = [], end = monthEnd(ds);
   for (let d = monthStart(ds); d <= end; d = addDays(d, 1)) out.push(d);

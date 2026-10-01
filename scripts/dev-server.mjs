@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { hashPin, verifyPin, validPin, newToken, MAX_FAILS, LOCKOUT_MINUTES } from "../api/_lib/auth.js";
 import { validatePhoto, newPhotoId, stripDataUrl, b64Bytes } from "../api/_lib/photos.js";
 import { validEntryDate, ENTRY_DATE_ERROR } from "../api/_lib/month.js";
+import { reconcileActivity } from "../api/_lib/activity.js";
 import { validAgeBand, cleanGoals, cleanNote, FITNESS, validFeeling } from "../api/_lib/profile.js";
 
 const ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..");
@@ -67,6 +68,8 @@ async function apiRoute(req, res, path, q) {
   if (path === "/api/board" && req.method === "GET") {
     /* demo: hide everyone else's throwaway guest account — see api/board.js */
     const viewer = d.sessions[req.headers["x-user-token"]] || null;
+    const asked = q.get("month") || "";
+    const month = /^\d{4}-\d{2}$/.test(asked) ? asked : new Date().toISOString().slice(0, 7);
     const visible = process.env.DEMO_MODE === "1"
       ? d.users.filter(u => !/^Guest \d+$/.test(u.name) || u.id === viewer)
       : d.users;
@@ -76,12 +79,16 @@ async function apiRoute(req, res, path, q) {
       users: visible.map(u => ({
         id: u.id, name: u.name, emoji: u.emoji, joined: u.joined,
         has_pin: !!u.pin_hash,
+        /* mirrors api/board.js: last day they logged, or the day they joined */
+        last_active: d.entries
+          .filter(e => e.user_id === u.id && e.done)
+          .reduce((m, e) => (e.date > m ? e.date : m), u.joined || ""),
       })),
       /* photo_id only, never the bytes — see api/board.js */
       /* current calendar month, mirroring api/board.js */
       entries: d.entries
         .filter(e => ids.has(e.user_id))
-        .filter(e => e.date.slice(0, 7) === new Date().toISOString().slice(0, 7))
+        .filter(e => e.date.slice(0, 7) === month)
         .map(e => {
           const key = e.user_id + "|" + e.date;
           return {
@@ -101,6 +108,7 @@ async function apiRoute(req, res, path, q) {
             .sort((a, b) => b.n - a.n).slice(0, 12)
         : [],
       funIdeas: d.funIdeas,
+      month,
       build: "dev",
       demo: process.env.DEMO_MODE === "1",
     });
@@ -366,8 +374,17 @@ async function apiRoute(req, res, path, q) {
        day would behave differently locally than in production. */
     if (done === null && kind === "fun") delete d.photos[userId + "|" + date];
     if (done !== null) {
+      /* mirrors api/log.js: reuse this person's existing casing for an
+         exercise they have logged before */
+      let name = activity ? String(activity).slice(0, 200) : null;
+      if (name && kind === "exercise") {
+        const known = d.entries
+          .filter(e => e.user_id === userId && e.kind === "exercise" && e.activity)
+          .map(e => e.activity);
+        name = reconcileActivity(name, known) || null;
+      }
       d.entries.push({ user_id: userId, date, kind, done: !!done,
-        activity: activity ? String(activity).slice(0, 200) : null,
+        activity: name,
         note: note ? String(note).slice(0, 500) : null, minutes, distance_km, feeling });
     }
     await put(d);

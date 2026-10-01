@@ -434,3 +434,11 @@ nav.tabs button.on { color: var(--accent); font-weight: 600; }
 }
 .mbar i { display: block; height: 100%; background: var(--good, #0ca30c); border-radius: 99px; }
 .mnum { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* ---- month pager ---- */
+.monthnav {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  padding: 4px 0 10px; font-size: 15px;
+}
+.monthnav button[disabled] { opacity: 0.3; pointer-events: none; }
+.card.quiet { background: none; border-style: dashed; }

@@ -1,4 +1,5 @@
 import { sql, endpoint } from "./_lib/db.js";
+import { foldActivityCounts } from "./_lib/activity.js";
 
 /* Your own history, a row per month.
 
@@ -38,7 +39,7 @@ async function summaryFor(userId) {
       FROM entries
      WHERE user_id = ${userId} AND kind = 'exercise' AND done
        AND activity IS NOT NULL AND activity <> ''
-  GROUP BY activity ORDER BY n DESC, activity LIMIT 3`;
+  GROUP BY activity ORDER BY n DESC, activity LIMIT 12`;   /* folded below */
 
   /* Comments and likes received: the sociable half of the board, and the part
      people are most pleased to see counted. */
@@ -65,7 +66,7 @@ async function summaryFor(userId) {
     photos: t.photos + m.photos,
   }), { exerciseDays: 0, funDays: 0, minutes: 0, km: 0, photos: 0 });
 
-  return { months: rows, totals: { ...totals, ...social, topActivities: top } };
+  return { months: rows, totals: { ...totals, ...social, topActivities: foldActivityCounts(top).slice(0, 3) } };
 }
 
 /* GET /api/me            → your own fitness profile.

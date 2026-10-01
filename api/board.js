@@ -18,14 +18,30 @@ export default endpoint(async (req, res) => {
      Null for a signed-out visitor, which just makes liked_by_me false. */
   const viewer = await sessionUser(req);
 
+  /* Which month to send. Defaults to the current one; the client asks for an
+     earlier 'YYYY-MM' when someone pages back. Only ever one month at a time,
+     because this payload is refetched every 60 seconds by every phone. */
+  const asked = String(req.query.month || "");
+  const month = /^\d{4}-\d{2}$/.test(asked)
+    ? asked
+    : new Date().toISOString().slice(0, 7);
+
   const [users, entries, funIdeas, myActivities] = await Promise.all([
     /* Name and avatar only. Age band, goals, fitness level and notes are
        private to their owner and come back from /api/me instead — the board
        is shared with everyone who has the passcode. */
-    sql`SELECT id, name, emoji,
-               to_char(created_at, 'YYYY-MM-DD') AS joined,
-               pin_hash IS NOT NULL AS has_pin
-        FROM users ORDER BY created_at`,
+    /* last_active drives hiding people who have drifted away. It looks across
+       every month, not just the one on screen, because on the 1st nobody has
+       logged anything yet and everyone would read as stale. */
+    sql`SELECT u.id, u.name, u.emoji,
+               to_char(u.created_at, 'YYYY-MM-DD') AS joined,
+               u.pin_hash IS NOT NULL AS has_pin,
+               greatest(coalesce(max(e.date), ''),
+                        to_char(u.created_at, 'YYYY-MM-DD')) AS last_active
+          FROM users u
+          LEFT JOIN entries e ON e.user_id = u.id AND e.done
+      GROUP BY u.id, u.name, u.emoji, u.created_at, u.pin_hash
+      ORDER BY u.created_at`,
     /* p.id only — NEVER p.data. This response is refetched every 60 seconds on
        phones; photo bytes belong in /api/photo, fetched once and cached. */
     /* Like counts ride along here rather than in their own endpoint: the
@@ -48,13 +64,10 @@ export default endpoint(async (req, res) => {
         LEFT JOIN (SELECT owner_id, date, kind, count(*)::int AS n
                      FROM entry_comments GROUP BY owner_id, date, kind) c
           ON c.owner_id = e.user_id AND c.date = e.date AND c.kind = e.kind
-        /* Current calendar month only. The client renders one month's grid and
-           computes streaks inside it, so shipping older months would be bytes
-           nobody draws — on a payload refetched every 60 seconds. Past months
-           stay in the table. */
-        WHERE e.date >= to_char(now(), 'YYYY-MM-01')
-          AND e.date <= to_char((date_trunc('month', now())
-                                 + interval '1 month - 1 day'), 'YYYY-MM-DD')`,
+        /* One month per request. The client renders a single grid and
+           computes streaks inside it, so shipping every month would be bytes
+           nobody draws — on a payload refetched every 60 seconds. */
+        WHERE e.date LIKE ${month + '%'}`,
     sql`SELECT id, text, added_by FROM fun_ideas ORDER BY id`,
     /* What this person actually does, across every month rather than the one
        on screen. The chip list is reordered from it, so on the 1st your habits
@@ -84,5 +97,5 @@ export default endpoint(async (req, res) => {
     ? hideOtherGuests(viewer, users, entries)
     : [users, entries];
   res.status(200).json({ users: shownUsers, entries: shownEntries, funIdeas,
-                        myActivities, build, demo });
+                        myActivities, month, build, demo });
 });

@@ -1,6 +1,7 @@
 import { sql, endpoint, bad } from "./_lib/db.js";
 import { validEntryDate, ENTRY_DATE_ERROR } from "./_lib/month.js";
 import { validFeeling } from "./_lib/profile.js";
+import { reconcileActivity } from "./_lib/activity.js";
 
 /* POST { date, kind, done, activity?, note? } → upsert (last write wins).
    done:null deletes the entry (un-log / backfill clear).
@@ -22,6 +23,18 @@ export default endpoint(async (req, res, userId) => {
   if (!validEntryDate(date)) return bad(res, ENTRY_DATE_ERROR);
   if (kind !== "exercise" && kind !== "fun") return bad(res, "bad kind");
 
+  /* Reconcile the name against what this person has already used, so a second
+     "body pump" lands on their existing "Body Pump" instead of becoming a
+     second chip. Exercise only: a fun entry's text is a one-off description,
+     not a category, so leave it exactly as written. */
+  let name = activity ? String(activity).slice(0, 200) : null;
+  if (name && kind === "exercise") {
+    const known = await sql`SELECT DISTINCT activity FROM entries
+                             WHERE user_id = ${userId} AND kind = 'exercise'
+                               AND activity IS NOT NULL AND activity <> ''`;
+    name = reconcileActivity(name, known.map(r => r.activity)) || null;
+  }
+
   if (done === null) {
     await sql`DELETE FROM entries WHERE user_id = ${userId} AND date = ${date} AND kind = ${kind}`;
     return res.status(200).json({ ok: true });
@@ -29,7 +42,7 @@ export default endpoint(async (req, res, userId) => {
 
   await sql`INSERT INTO entries (user_id, date, kind, done, activity, note, minutes, distance_km, feeling, updated_at)
             VALUES (${userId}, ${date}, ${kind}, ${!!done},
-                    ${activity ? String(activity).slice(0, 200) : null},
+                    ${name},
                     ${note ? String(note).slice(0, 500) : null},
                     ${minutes}, ${distanceKm}, ${feeling}, now())
             ON CONFLICT (user_id, date, kind) DO UPDATE SET

@@ -36,7 +36,7 @@ async function request(path, opts = {}) {
 const post = (path, body) => request(path, { method: "POST", body: JSON.stringify(body) });
 
 export const api = {
-  getBoard: () => request("/api/board"),
+  getBoard: (month) => request("/api/board" + (month ? `?month=${encodeURIComponent(month)}` : "")),
   getMe: () => request("/api/me"),
   demoLogin: () => post("/api/demo", {}),
   suggest: (date) => post("/api/suggest", { date }),

@@ -1,3 +1,29 @@
+/* Who still counts as part of the board.
+
+   Someone who logged twice in the first week and never came back makes the
+   board read as a graveyard, so they drop out after three weeks of silence.
+   Nothing is deleted — their entries and grid are intact, and `hidden` is
+   returned so the view can offer them back rather than quietly losing people.
+
+   Two people are never hidden: yourself, however long you have been away,
+   because a board that has dropped you is confusing rather than tidy; and
+   anyone who joined inside the window, who has not been away at all. */
+export const STALE_AFTER_DAYS = 21;
+
+export function activeUsers(users, today, meId, showAll = false, days = STALE_AFTER_DAYS) {
+  const cut = new Date(today + "T00:00:00");
+  cut.setDate(cut.getDate() - days);
+  const cutoff = cut.toISOString().slice(0, 10);
+  const all = users || [];
+  if (showAll) return { shown: all, hidden: [] };
+  const shown = [], hidden = [];
+  for (const u of all) {
+    const seen = u.last_active || u.joined || "";
+    (u.id === meId || seen >= cutoff ? shown : hidden).push(u);
+  }
+  return { shown, hidden };
+}
+
 export const DEFAULT_ACTIVITIES =
   ["Run", "Walk", "Gym", "Cycle", "Swim", "Yoga", "Class", "Other"];
 

@@ -2,6 +2,8 @@
      import("/js/selftests.js").then(m => m.runSelfTests())
    Pure logic only; no network, no DOM. */
 import { FUN_PROMPTS } from "./data/fun-prompts.js";
+import { reconcileActivity, foldActivityCounts, cleanActivity }
+  from "../api/_lib/activity.js";
 import { addDays, prettyDate, monthDates, monthDayNum, monthStart, monthEnd,
          monthLength, monthName, monthOf } from "./dates.js";
 import { currentStreak, bestStreak, totalHits, dayResult, HIT, MISS, PENDING, NEUTRAL } from "./streaks.js";
@@ -9,7 +11,7 @@ import { pickWorkouts, hashStr, needsEasyDay } from "./suggestions.js";
 import { expandAgeBand } from "./profile.js";
 import { WORKOUTS } from "./data/workouts.js";
 import { funPromptFor, funPool } from "./fun.js";
-import { orderedActivities, DEFAULT_ACTIVITIES, buildLogs, minutesOf, prettyMinutes, describeEntry, totalMinutes, feelingLabel } from "./logs.js";
+import { activeUsers, orderedActivities, DEFAULT_ACTIVITIES, buildLogs, minutesOf, prettyMinutes, describeEntry, totalMinutes, feelingLabel } from "./logs.js";
 import { readExifOrientation, orientationTransform, fitDimensions, galleryItems } from "./imageutil.js";
 
 export function runSelfTests() {
@@ -218,6 +220,39 @@ export function runSelfTests() {
     currentStreak(U, sepLog, "2026-10-01"), 0);
   check("last month's days don't count toward this month's total",
     totalHits(U, sepLog, "2026-10-05"), 0);
+
+  /* ---- tidying activity names ---- */
+  check("whitespace collapsed", cleanActivity("  Body   Pump "), "Body Pump");
+  check("reuses your own casing", reconcileActivity("body pump", ["Body Pump"]), "Body Pump");
+  check("a new name is kept as typed", reconcileActivity("Hockey", ["Body Pump"]), "Hockey");
+  /* deliberate: a rule that merges these would eventually merge two things
+     somebody meant to keep apart */
+  check("plurals are not merged automatically",
+    reconcileActivity("Building works", ["Building work"]), "Building works");
+  check("case variants count as one",
+    foldActivityCounts([{ activity: "Body Pump", n: 3 }, { activity: "body pump", n: 1 }]),
+    [{ activity: "Body Pump", n: 4 }]);
+  check("the most-used spelling wins, whatever the order",
+    foldActivityCounts([{ activity: "body pump", n: 1 }, { activity: "Body Pump", n: 3 }])[0].activity,
+    "Body Pump");
+
+  /* ---- hiding people who drifted away ---- */
+  {
+    const T = "2026-10-01";
+    const us = [
+      { id: "a", joined: "2026-09-01", last_active: "2026-09-30" },  /* 1 day */
+      { id: "b", joined: "2026-09-01", last_active: "2026-09-02" },  /* 29 days */
+      { id: "c", joined: "2026-09-29", last_active: "2026-09-29" },  /* just joined */
+      { id: "me", joined: "2026-09-01", last_active: "2026-09-01" }, /* stale, but me */
+    ];
+    const { shown, hidden } = activeUsers(us, T, "me");
+    check("recent loggers stay", shown.map(u => u.id).includes("a"), true);
+    check("three weeks silent drops off", hidden.map(u => u.id), ["b"]);
+    check("someone who just joined stays", shown.map(u => u.id).includes("c"), true);
+    check("you are never hidden from your own board",
+      shown.map(u => u.id).includes("me"), true);
+    check("show-all hides nobody", activeUsers(us, T, "me", true).hidden.length, 0);
+  }
 
   /* ---- activity ordering ---- */
   check("no history keeps the stock order",

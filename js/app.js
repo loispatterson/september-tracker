@@ -1,12 +1,12 @@
 import { api, setPasscode, setToken, clearToken, isPasscodeError, isAuthError,
          isNameTaken, errorMessage } from "./api.js";
 import { todayStr, prettyDate, monthDates, monthDayNum, monthStart, monthEnd,
-         monthName, monthLength, addDays } from "./dates.js";
+         monthName, monthLength, monthOf, shiftMonth, addDays } from "./dates.js";
 import { currentStreak, bestStreak, totalHits, dayResult, HIT, MISS, PENDING } from "./streaks.js";
 import { getSuggestions, getAiSuggestions, aiAvailable } from "./suggestions.js";
 import { funPromptFor } from "./fun.js";
 import { AGE_BANDS, GOALS, FITNESS, FEELINGS, isLegacyBand } from "./profile.js";
-import { orderedActivities, buildLogs, minutesOf, prettyMinutes, describeEntry, totalMinutes,
+import { activeUsers, orderedActivities, buildLogs, minutesOf, prettyMinutes, describeEntry, totalMinutes,
          feelingLabel, DEFAULT_MINUTES } from "./logs.js";
 import { galleryItems } from "./imageutil.js";
 import { prepareUpload, blobToBase64, hydratePhotos, forgetPhoto, cachedUrl } from "./photos.js";
@@ -40,6 +40,8 @@ const ui = {
   funOwn: false,
   thread: null,                   /* { owner, date, comments, loading, busy, error } */
   summary: null,                  /* { months, totals } once the Progress tab is opened */
+  showAll: false,                 /* reveal people who have drifted away */
+  month: null,                    /* the month the Board and Photos show; null = this one */
   exOther: false,                 /* "Other…" free-text entry is open */
   customMinutes: false,           /* typing a duration the chips don't cover */
   cell: null,                     /* { userId, date } open popover */
@@ -91,6 +93,11 @@ async function loadMyProfile() {
 }
 function entryFor(log, ds, userId) { return (log[ds] && log[ds][userId]) || null; }
 
+/* The month the Board and Photos tabs are showing. Today always stays on the
+   real month — you log against today, not against history. */
+function viewMonth() { return ui.month || monthOf(todayStr()); }
+function viewMonthDates() { return monthDates(viewMonth() + "-01"); }
+
 /* The day the Today tab is showing. Clamped into this month and never ahead of
    today, so you can catch up on a day you missed but not log the future. */
 function viewDate() {
@@ -114,7 +121,7 @@ let loadedBuild = null;
 
 async function refresh() {
   try {
-    board = await api.getBoard();
+    board = await api.getBoard(ui.month || undefined);
     if (loadedBuild === null) loadedBuild = board.build || null;
     else if (board.build && board.build !== loadedBuild) return updateAvailable();
     ui.needPasscode = false;
@@ -613,14 +620,15 @@ function renderLightbox() {
 /* ---------- board ---------- */
 /* When someone joined: clamps to Sept 1, so days before they joined read as
    "not their problem" rather than misses. */
-function joinedOf(u) {
-  const j = u.joined || monthStart();
-  return j < monthStart() ? monthStart() : j;
+function joinedOf(u, ref) {
+  const start = ref ? monthStart(ref) : monthStart();
+  const j = u.joined || start;
+  return j < start ? start : j;
 }
 
-function cellClass(userId, ds, today, since) {
+function cellClass(userId, ds, today, since, ref) {
   if (ds > today) return "future";
-  const r = dayResult(userId, exLog, ds, today, since);
+  const r = dayResult(userId, exLog, ds, today, since, ref);
   if (r === HIT) return "hit";
   if (r === MISS) return "miss";
   if (r === PENDING) return "pending";
@@ -636,15 +644,15 @@ function cellClass(userId, ds, today, since) {
    sits below someone who joined on the 1st with the same habit. That is the
    honest reading of "most logged days" and the grid underneath shows the join
    date, so nobody is being misrepresented. */
-function boardOrder(today) {
-  return board.users
+function boardOrder(today, users, ref) {
+  return (users || board.users)
     .map(u => {
-      const since = joinedOf(u);
+      const since = joinedOf(u, ref);
       return {
         u, since,
-        total: totalHits(u.id, exLog, today, since),
-        cur: currentStreak(u.id, exLog, today, since),
-        best: bestStreak(u.id, exLog, today, since),
+        total: totalHits(u.id, exLog, today, since, ref),
+        cur: currentStreak(u.id, exLog, today, since, ref),
+        best: bestStreak(u.id, exLog, today, since, ref),
       };
     })
     .sort((a, b) =>
@@ -654,23 +662,57 @@ function boardOrder(today) {
       a.u.name.localeCompare(b.u.name));
 }
 
+/* Month pager. Back as far as the first month anyone logged in, never
+   forward past the current one — there is nothing there yet. */
+function monthNav() {
+  const m = viewMonth(), now = monthOf(todayStr());
+  const first = (board.firstMonth && board.firstMonth < m) ? board.firstMonth : "2026-09";
+  const canBack = m > first;
+  const canFwd = m < now;
+  const label = monthName(m + "-01") + " " + m.slice(0, 4);
+  return `<div class="monthnav">
+    <button class="btn small ghost" data-action="month-back" ${canBack ? "" : "disabled"}
+            aria-label="Previous month">←</button>
+    <b>${esc(label)}</b>
+    <button class="btn small ghost" data-action="month-fwd" ${canFwd ? "" : "disabled"}
+            aria-label="Next month">→</button>
+    ${m !== now ? `<button class="btn small ghost" data-action="month-now">This month</button>` : ""}
+  </div>`;
+}
+
 function renderBoard() {
   const today = todayStr();
-  const dates = monthDates();
+  const month = viewMonth();
+  const dates = viewMonthDates();
   if (!board.users.length) return `<div class="card"><p class="muted">Nobody's joined yet.</p></div>`;
 
-  const ranked = boardOrder(today);
-  return ranked.map(({ u, since, total: tot, cur, best }, i) => {
+  /* People who stopped logging three weeks ago drop off, so the board reads as
+     who is actually doing this rather than who once signed up. Offered back
+     rather than hidden silently. */
+  const { shown, hidden } = activeUsers(board.users, today, me && me.id, ui.showAll);
+  const ranked = boardOrder(today, shown, month + "-01");
+  const hiddenNote = hidden.length
+    ? `<div class="card quiet"><p class="muted small">
+         ${hidden.length} ${hidden.length === 1 ? "person has" : "people have"}
+         not logged anything for three weeks.
+         <button class="btn small ghost" data-action="show-all">Show ${
+           hidden.length === 1 ? "them" : "them"}</button></p></div>`
+    : (ui.showAll && board.users.length > ranked.length ? "" : "");
+  const showingAllNote = ui.showAll
+    ? `<div class="card quiet"><p class="muted small">Showing everyone.
+         <button class="btn small ghost" data-action="show-active">Hide the quiet ones</button></p></div>`
+    : "";
+  const cards = ranked.map(({ u, since, total: tot, cur, best }, i) => {
     const cells = dates.map(ds => {
       const fun = entryFor(funLog, ds, u.id);
       const hasPhoto = !!(photoLog[ds] && photoLog[ds][u.id]);
-      return `<button class="cell ${cellClass(u.id, ds, today, since)}" data-action="cell" data-id="${u.id}" data-date="${ds}">
+      return `<button class="cell ${cellClass(u.id, ds, today, since, month + "-01")}" data-action="cell" data-id="${u.id}" data-date="${ds}">
         ${monthDayNum(ds)}${fun && fun.done
           ? `<span class="fun-dot${hasPhoto ? " photo" : ""}"></span>` : ""}
       </button>`;
     }).join("");
-    const funStreak = currentStreak(u.id, funLog, today, since);
-    const photoStreak = currentStreak(u.id, photoLog, today, since);
+    const funStreak = currentStreak(u.id, funLog, today, since, month + "-01");
+    const photoStreak = currentStreak(u.id, photoLog, today, since, month + "-01");
     const panel = ui.cell && ui.cell.userId === u.id ? cellPanel(u, ui.cell.date, today) : "";
     /* Only worth a medal if there is somebody to be ahead of, and only when
        days have actually been logged. A 🥇 for nought out of thirty on the
@@ -683,7 +725,7 @@ function renderBoard() {
         ${medal ? `<span class="medal" title="${tot} day${tot === 1 ? "" : "s"} logged">${medal}</span>` : ""}
       </div>
       <div class="streaks">
-        <span class="stats">🔥 ${cur} · best ${best} · ${tot}/${monthLength()}</span>
+        <span class="stats">🔥 ${cur} · best ${best} · ${tot}/${monthLength(month + "-01")}</span>
         <span class="stats time">⏱ ${prettyMinutes(totalMinutes(board.entries, u.id))}</span>
         <span class="stats fun">🎉 ${funStreak}</span>
         <span class="stats photo">📸 ${photoStreak}</span>
@@ -692,6 +734,7 @@ function renderBoard() {
       ${panel}
     </div>`;
   }).join("");
+  return monthNav() + cards + hiddenNote + showingAllNote;
 }
 
 function cellPanel(u, ds, today) {
@@ -1104,6 +1147,22 @@ async function onClick(ev) {
     render();
     return;
   }
+
+  /* ---- month paging on the Board and Photos ---- */
+  if (a === "month-back" || a === "month-fwd" || a === "month-now") {
+    const m = viewMonth();
+    ui.month = a === "month-now" ? null
+      : shiftMonth(m, a === "month-back" ? -1 : 1);
+    if (ui.month === monthOf(todayStr())) ui.month = null;
+    ui.cell = null; ui.lightbox = null; ui.thread = null;
+    ui.loading = true; render();
+    await refresh();                   /* the board carries one month at a time */
+    render();
+    return;
+  }
+
+  if (a === "show-all") { ui.showAll = true; render(); return; }
+  if (a === "show-active") { ui.showAll = false; render(); return; }
 
   if (a === "tab") {
     ui.tab = el.dataset.tab;
