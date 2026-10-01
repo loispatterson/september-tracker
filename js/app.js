@@ -161,17 +161,41 @@ async function saveEntry({ date, kind, done, activity, note, minutes, distanceKm
 
 /* A newer version is deployed. Don't yank the page out from under someone
    mid-upload; otherwise reload so nobody is quietly using an old app. */
-let updatePending = false;
+let updateWanted = false, updateToasted = false;
+
+/* Anything half-finished that a reload would throw away. A comment being
+   typed counts: losing a sentence mid-word reads as the app being broken
+   rather than as an update, and on a day with several deploys it happens
+   again and again. */
+function midTask() {
+  const box = document.getElementById("comment-input");
+  return !!(ui.photoBusy || ui.photoDraft || ui.exOther || ui.funOwn ||
+            (ui.thread && ui.thread.busy) ||
+            (box && box.value.trim()) ||
+            isTyping());
+}
+
 function updateAvailable() {
-  if (updatePending) return;
-  updatePending = true;
-  if (ui.photoBusy || ui.photoDraft || ui.exOther || ui.funOwn) {
-    toast("An update is ready — finish this and it'll refresh");
+  updateWanted = true;
+  tryUpdate();
+}
+
+/* Reload once nothing is in flight. The old version promised "finish this and
+   it'll refresh" and then never refreshed, so a tab that was busy at the wrong
+   moment stayed on stale code for the rest of the session. */
+function tryUpdate() {
+  if (!updateWanted) return;
+  if (midTask()) {
+    if (!updateToasted) {
+      updateToasted = true;
+      toast("An update is ready — it'll refresh when you're done");
+    }
     return;
   }
   toast("Updating to the newest version…");
   setTimeout(() => location.reload(), 1200);
 }
+setInterval(tryUpdate, 5000);
 
 /* This device's session is no longer valid — back to the name list. */
 function signedOut() {

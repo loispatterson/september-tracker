@@ -259,8 +259,14 @@ input[type="text"], textarea {
   display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 12px;
   padding: 16px calc(16px + env(safe-area-inset-right)) calc(16px + env(safe-area-inset-bottom));
+  /* With a thread open the photo and the comments together can be taller than
+     the screen. Centred content overflows in both directions and the box at
+     the bottom becomes unreachable, so let it scroll instead. */
+  overflow-y: auto;
 }
 .lightbox img { max-width: 100%; max-height: 78vh; border-radius: 10px; }
+/* The photo gives up height when there are comments to read. */
+.lightbox:has(.thread) img { max-height: 46vh; }
 .lightbox .cap { color: #fff; font-size: 14px; text-align: center; }
 .lb-actions { display: flex; align-items: center; gap: 12px; }
 
