@@ -87,3 +87,24 @@ CREATE TABLE IF NOT EXISTS photo_likes (
 -- The board counts likes per photo on every refresh, which is the only read
 -- that isn't by primary key.
 CREATE INDEX IF NOT EXISTS photo_likes_photo ON photo_likes (photo_id);
+
+-- Comments on a fun day. Attached to the entry rather than to the photo,
+-- unlike likes: a fun day is worth talking about whether or not it has a
+-- picture, and a comment on "cooked for six" should survive the photo being
+-- swapped. That is the opposite of the photo_likes cascade and it is
+-- deliberate — likes are about the image, comments are about the day.
+CREATE TABLE IF NOT EXISTS entry_comments (
+  id         serial PRIMARY KEY,
+  user_id    text NOT NULL REFERENCES users(id) ON DELETE CASCADE,  -- who wrote it
+  owner_id   text NOT NULL,                                          -- whose day
+  date       text NOT NULL,
+  kind       text NOT NULL DEFAULT 'fun',
+  body       text NOT NULL,
+  created_at timestamptz DEFAULT now(),
+  FOREIGN KEY (owner_id, date, kind) REFERENCES entries (user_id, date, kind) ON DELETE CASCADE
+);
+
+-- The board asks for counts per day across everyone, and the thread view asks
+-- for one day's comments in order.
+CREATE INDEX IF NOT EXISTS entry_comments_target
+  ON entry_comments (owner_id, date, kind, id);

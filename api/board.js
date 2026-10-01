@@ -18,7 +18,7 @@ export default endpoint(async (req, res) => {
      Null for a signed-out visitor, which just makes liked_by_me false. */
   const viewer = await sessionUser(req);
 
-  const [users, entries, funIdeas] = await Promise.all([
+  const [users, entries, funIdeas, myActivities] = await Promise.all([
     /* Name and avatar only. Age band, goals, fitness level and notes are
        private to their owner and come back from /api/me instead — the board
        is shared with everyone who has the passcode. */
@@ -34,7 +34,8 @@ export default endpoint(async (req, res) => {
     sql`SELECT e.user_id, e.date, e.kind, e.done, e.activity, e.note,
                e.minutes, e.distance_km, e.feeling, p.id AS photo_id,
                coalesce(l.n, 0) AS likes,
-               (mine.user_id IS NOT NULL) AS liked_by_me
+               (mine.user_id IS NOT NULL) AS liked_by_me,
+               coalesce(c.n, 0) AS comments
         FROM entries e
         LEFT JOIN entry_photos p
           ON p.user_id = e.user_id AND p.date = e.date AND p.kind = e.kind
@@ -42,8 +43,35 @@ export default endpoint(async (req, res) => {
                      FROM photo_likes GROUP BY photo_id) l ON l.photo_id = p.id
         LEFT JOIN photo_likes mine
           ON mine.photo_id = p.id AND mine.user_id = ${viewer}
-        WHERE e.date >= '2026-09-01' AND e.date <= '2026-09-30'`,
+        /* Just the count. Bodies are fetched per thread when someone opens
+           one — this payload is refetched every 60 seconds by every phone. */
+        LEFT JOIN (SELECT owner_id, date, kind, count(*)::int AS n
+                     FROM entry_comments GROUP BY owner_id, date, kind) c
+          ON c.owner_id = e.user_id AND c.date = e.date AND c.kind = e.kind
+        /* Current calendar month only. The client renders one month's grid and
+           computes streaks inside it, so shipping older months would be bytes
+           nobody draws — on a payload refetched every 60 seconds. Past months
+           stay in the table. */
+        WHERE e.date >= to_char(now(), 'YYYY-MM-01')
+          AND e.date <= to_char((date_trunc('month', now())
+                                 + interval '1 month - 1 day'), 'YYYY-MM-DD')`,
     sql`SELECT id, text, added_by FROM fun_ideas ORDER BY id`,
+    /* What this person actually does, across every month rather than the one
+       on screen. The chip list is reordered from it, so on the 1st your habits
+       carry over instead of the app forgetting you. Viewer-only and tiny: one
+       row per distinct activity they have ever logged.
+
+       `last` breaks ties towards what you did recently, so two activities on
+       the same count don't swap places at random between refreshes. */
+    viewer
+      ? sql`SELECT activity, count(*)::int AS n, max(date) AS last
+              FROM entries
+             WHERE user_id = ${viewer} AND kind = 'exercise'
+               AND done AND activity IS NOT NULL AND activity <> ''
+          GROUP BY activity
+          ORDER BY n DESC, last DESC
+             LIMIT 12`
+      : Promise.resolve([]),
   ]);
   /* Lets an open tab notice it is running superseded code. */
   /* CLI deploys have no commit SHA, so fall back to the per-deployment id. */
@@ -55,5 +83,6 @@ export default endpoint(async (req, res) => {
   const [shownUsers, shownEntries] = demo
     ? hideOtherGuests(viewer, users, entries)
     : [users, entries];
-  res.status(200).json({ users: shownUsers, entries: shownEntries, funIdeas, build, demo });
+  res.status(200).json({ users: shownUsers, entries: shownEntries, funIdeas,
+                        myActivities, build, demo });
 });

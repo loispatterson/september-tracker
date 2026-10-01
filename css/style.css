@@ -264,6 +264,46 @@ input[type="text"], textarea {
 .lightbox .cap { color: #fff; font-size: 14px; text-align: center; }
 .lb-actions { display: flex; align-items: center; gap: 12px; }
 
+/* ---- comments ---- */
+/* Inside the lightbox, so it sits on the dark ground and sets its own colours
+   rather than inheriting the page's. Capped and scrollable: a long thread must
+   never push the photo off screen, and on a phone in landscape there isn't
+   much height to give away. */
+.thread {
+  width: min(520px, 100%);
+  max-height: 34vh; overflow-y: auto;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.16);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 8px;
+  color: #fff;
+}
+.thread .muted { color: rgba(255,255,255,0.6); }
+.cmt {
+  display: flex; align-items: baseline; gap: 7px;
+  font-size: 13.5px; line-height: 1.45;
+}
+.cmt .who { font-weight: 600; white-space: nowrap; }
+.cmt .body { flex: 1; overflow-wrap: anywhere; }
+.cmt-x {
+  flex: none; width: 22px; height: 22px; border: 0; border-radius: 50%;
+  background: transparent; color: rgba(255,255,255,0.5);
+  font-size: 17px; line-height: 1; cursor: pointer;
+}
+.cmt-x:hover { background: rgba(255,255,255,0.14); color: #fff; }
+.cmt-add { display: flex; gap: 8px; margin-top: 2px; }
+.cmt-add input {
+  flex: 1; min-width: 0;                       /* or it overflows the flex row */
+  font: inherit; font-size: 15px;              /* 16px-ish: smaller zooms on iOS */
+  padding: 7px 10px; border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.22);
+  background: rgba(0,0,0,0.3); color: #fff;
+}
+.cmt-add input::placeholder { color: rgba(255,255,255,0.45); }
+.cmt-add input:focus { outline: 2px solid rgba(255,255,255,0.5); outline-offset: 1px; }
+.thread .err { color: #ffb4ab; }
+
 /* ---- likes ---- */
 /* 34px square is the smallest comfortable thumb target, and the tiles are
    only ~104px wide, so it cannot grow much beyond that. */
@@ -376,3 +416,21 @@ nav.tabs button.on { color: var(--accent); font-weight: 600; }
   .grid30 { gap: 3px; }
   main { padding: 12px; }
 }
+
+/* ---- progress ---- */
+.card.lead .big { font-size: 17px; line-height: 1.5; margin: 6px 0 4px; }
+.card .big { font-size: 16px; margin: 6px 0 4px; }
+.months { display: flex; flex-direction: column; gap: 7px; }
+/* Name, bar, number. The bar is the only flexible column so the two text
+   columns stay aligned down the list however long a month name is. */
+.mrow {
+  display: grid; grid-template-columns: 8.5em 1fr auto;
+  align-items: center; gap: 10px; font-size: 13px;
+}
+.mname { color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mbar {
+  height: 8px; border-radius: 99px; background: rgba(127,127,127,0.18);
+  overflow: hidden;
+}
+.mbar i { display: block; height: 100%; background: var(--good, #0ca30c); border-radius: 99px; }
+.mnum { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }

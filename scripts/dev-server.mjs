@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 /* same PIN/token rules as production, imported rather than reimplemented */
 import { hashPin, verifyPin, validPin, newToken, MAX_FAILS, LOCKOUT_MINUTES } from "../api/_lib/auth.js";
 import { validatePhoto, newPhotoId, stripDataUrl, b64Bytes } from "../api/_lib/photos.js";
+import { validEntryDate, ENTRY_DATE_ERROR } from "../api/_lib/month.js";
 import { validAgeBand, cleanGoals, cleanNote, FITNESS, validFeeling } from "../api/_lib/profile.js";
 
 const ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..");
@@ -77,13 +78,28 @@ async function apiRoute(req, res, path, q) {
         has_pin: !!u.pin_hash,
       })),
       /* photo_id only, never the bytes — see api/board.js */
+      /* current calendar month, mirroring api/board.js */
       entries: d.entries
         .filter(e => ids.has(e.user_id))
-        .filter(e => e.date >= "2026-09-01" && e.date <= "2026-09-30")
-        .map(e => ({
-          ...e,
-          photo_id: e.kind === "fun" ? (d.photos[e.user_id + "|" + e.date] || {}).id || null : null,
-        })),
+        .filter(e => e.date.slice(0, 7) === new Date().toISOString().slice(0, 7))
+        .map(e => {
+          const key = e.user_id + "|" + e.date;
+          return {
+            ...e,
+            photo_id: e.kind === "fun" ? (d.photos[key] || {}).id || null : null,
+            likes: ((d.likes || {})[(d.photos[key] || {}).id] || []).length,
+            liked_by_me: (((d.likes || {})[(d.photos[key] || {}).id]) || []).includes(viewer),
+            comments: (d.comments || []).filter(
+              c => c.owner_id === e.user_id && c.date === e.date && c.kind === e.kind).length,
+          };
+        }),
+      myActivities: viewer
+        ? Object.entries(d.entries
+            .filter(e => e.user_id === viewer && e.kind === "exercise" && e.done && e.activity)
+            .reduce((m, e) => ({ ...m, [e.activity]: (m[e.activity] || 0) + 1 }), {}))
+            .map(([activity, n]) => ({ activity, n }))
+            .sort((a, b) => b.n - a.n).slice(0, 12)
+        : [],
       funIdeas: d.funIdeas,
       build: "dev",
       demo: process.env.DEMO_MODE === "1",
@@ -176,7 +192,7 @@ async function apiRoute(req, res, path, q) {
       if (back === 3) continue;
       const dd = new Date(now); dd.setDate(dd.getDate() - back);
       const ds = iso(dd);
-      if (ds < "2026-09-01" || ds > "2026-09-30") continue;
+      if (!validEntryDate(ds)) continue;   /* a throwaway account only gets this month */
       seeded.push(ds);
       d.entries.push({ user_id: id, date: ds, kind: "exercise", done: true,
         activity: acts[back % acts.length], note: null,
@@ -307,8 +323,7 @@ async function apiRoute(req, res, path, q) {
     const distance_km = Number.isFinite(dist) && dist > 0
       ? Math.min(999, Math.round(dist * 100) / 100) : null;
     const feeling = validFeeling(logBody.feeling) ? logBody.feeling : null;
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date || "") || date < "2026-09-01" || date > "2026-09-30")
-      return send(res, 400, { error: "date must be in September 2026" });
+    if (!validEntryDate(date)) return send(res, 400, { error: ENTRY_DATE_ERROR });
     if (kind !== "exercise" && kind !== "fun") return send(res, 400, { error: "bad kind" });
     d.entries = d.entries.filter(e => !(e.user_id === userId && e.date === date && e.kind === kind));
     /* Production has ON DELETE CASCADE on entry_photos; there are no foreign
@@ -322,6 +337,79 @@ async function apiRoute(req, res, path, q) {
     }
     await put(d);
     return send(res, 200, { ok: true });
+  }
+
+  if (path === "/api/comment" && req.method === "GET") {
+    const owner = q.get("owner") || "", date = q.get("date") || "";
+    const rows = (d.comments || [])
+      .filter(c => c.owner_id === owner && c.date === date && c.kind === "fun")
+      .map(c => {
+        const u = d.users.find(x => x.id === c.user_id) || {};
+        return { ...c, name: u.name, emoji: u.emoji };
+      });
+    return send(res, 200, { comments: rows });
+  }
+
+  if (path === "/api/comment" && req.method === "POST") {
+    const me = d.sessions[req.headers["x-user-token"]];
+    if (!me) return send(res, 401, { error: "auth" });
+    const payload = await body(req);        /* `body` is the reader, not the parsed object */
+    d.comments = d.comments || [];
+    if (payload.delete) {
+      const before = d.comments.length;
+      d.comments = d.comments.filter(c => !(c.id === Number(payload.id) && c.user_id === me));
+      if (d.comments.length === before) return send(res, 404, { error: "not yours" });
+      await put(d);
+      return send(res, 200, { deleted: true });
+    }
+    const text = String(payload.body || "").trim().slice(0, 500);
+    if (!text) return send(res, 400, { error: "say something" });
+    const hit = d.entries.find(e =>
+      e.user_id === payload.owner && e.date === payload.date && e.kind === "fun");
+    if (!hit) return send(res, 404, { error: "no such day" });
+    const u = d.users.find(x => x.id === me) || {};
+    const row = {
+      id: (d.comments.reduce((n, c) => Math.max(n, c.id), 0) || 0) + 1,
+      user_id: me, owner_id: payload.owner, date: payload.date, kind: "fun",
+      body: text, at: new Date().toISOString(),
+    };
+    d.comments.push(row); await put(d);
+    return send(res, 200, { comment: { ...row, name: u.name, emoji: u.emoji } });
+  }
+
+  if (path === "/api/summary" && req.method === "GET") {
+    const me = d.sessions[req.headers["x-user-token"]];
+    if (!me) return send(res, 401, { error: "auth" });
+    const mine = d.entries.filter(e => e.user_id === me && e.done);
+    const by = {};
+    for (const e of mine) {
+      const m = (by[e.date.slice(0, 7)] ||= {
+        month: e.date.slice(0, 7), exerciseDays: 0, funDays: 0, minutes: 0, km: 0, photos: 0 });
+      if (e.kind === "exercise") { m.exerciseDays++; m.minutes += Number(e.minutes) || 0;
+                                   m.km += Number(e.distance_km) || 0; }
+      else m.funDays++;
+    }
+    for (const key of Object.keys(d.photos)) {
+      const [uid, date] = key.split("|");
+      if (uid === me && by[date.slice(0, 7)]) by[date.slice(0, 7)].photos++;
+    }
+    const months = Object.values(by).sort((a, b) => a.month.localeCompare(b.month));
+    const totals = months.reduce((t, m) => ({
+      exerciseDays: t.exerciseDays + m.exerciseDays, funDays: t.funDays + m.funDays,
+      minutes: t.minutes + m.minutes, km: t.km + m.km, photos: t.photos + m.photos,
+    }), { exerciseDays: 0, funDays: 0, minutes: 0, km: 0, photos: 0 });
+    const counts = mine.filter(e => e.kind === "exercise" && e.activity)
+      .reduce((m, e) => ({ ...m, [e.activity]: (m[e.activity] || 0) + 1 }), {});
+    return send(res, 200, {
+      months,
+      totals: {
+        ...totals,
+        comments_received: (d.comments || []).filter(c => c.owner_id === me).length,
+        likes_received: 0,
+        topActivities: Object.entries(counts).map(([activity, n]) => ({ activity, n }))
+          .sort((a, b) => b.n - a.n).slice(0, 3),
+      },
+    });
   }
 
   if (path === "/api/fun-ideas" && req.method === "POST") {

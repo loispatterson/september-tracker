@@ -102,6 +102,7 @@ export function galleryItems(entries, users, userId = null) {
       emoji: byId.get(e.user_id).emoji,
       likes: Number(e.likes) || 0,
       likedByMe: !!e.liked_by_me,
+      comments: Number(e.comments) || 0,
     }))
     .sort((a, b) => (a.date === b.date ? a.name.localeCompare(b.name) : b.date.localeCompare(a.date)));
 }

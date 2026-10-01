@@ -1,4 +1,5 @@
 import { sql, endpoint, bad } from "./_lib/db.js";
+import { validEntryDate, ENTRY_DATE_ERROR } from "./_lib/month.js";
 import { validFeeling } from "./_lib/profile.js";
 
 /* POST { date, kind, done, activity?, note? } → upsert (last write wins).
@@ -18,8 +19,7 @@ export default endpoint(async (req, res, userId) => {
     ? Math.min(999, Math.round(dist * 100) / 100) : null;
   const rawFeeling = (req.body || {}).feeling;
   const feeling = validFeeling(rawFeeling) ? rawFeeling : null;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date || "") || date < "2026-09-01" || date > "2026-09-30")
-    return bad(res, "date must be in September 2026");
+  if (!validEntryDate(date)) return bad(res, ENTRY_DATE_ERROR);
   if (kind !== "exercise" && kind !== "fun") return bad(res, "bad kind");
 
   if (done === null) {

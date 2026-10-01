@@ -1,17 +1,18 @@
 import { api, setPasscode, setToken, clearToken, isPasscodeError, isAuthError,
          isNameTaken, errorMessage } from "./api.js";
-import { todayStr, prettyDate, septDates, septDayNum, SEPT_START, SEPT_END, addDays } from "./dates.js";
+import { todayStr, prettyDate, monthDates, monthDayNum, monthStart, monthEnd,
+         monthName, monthLength, addDays } from "./dates.js";
 import { currentStreak, bestStreak, totalHits, dayResult, HIT, MISS, PENDING } from "./streaks.js";
 import { getSuggestions, getAiSuggestions, aiAvailable } from "./suggestions.js";
 import { funPromptFor } from "./fun.js";
 import { AGE_BANDS, GOALS, FITNESS, FEELINGS, isLegacyBand } from "./profile.js";
-import { buildLogs, minutesOf, prettyMinutes, describeEntry, totalMinutes,
+import { orderedActivities, buildLogs, minutesOf, prettyMinutes, describeEntry, totalMinutes,
          feelingLabel, DEFAULT_MINUTES } from "./logs.js";
 import { galleryItems } from "./imageutil.js";
 import { prepareUpload, blobToBase64, hydratePhotos, forgetPhoto, cachedUrl } from "./photos.js";
 
 const ME_KEY = "septTracker.me";
-const ACTIVITIES = ["Run", "Walk", "Gym", "Cycle", "Swim", "Yoga", "Class", "Other"];
+
 const EMOJIS = ["💪", "🏃", "🚴", "🧘", "🏊", "⚡", "🔥", "🌟", "🐝", "🦊", "🐙", "🦕"];
 
 /* ---------- state ---------- */
@@ -37,6 +38,8 @@ const ui = {
   showSuggestions: false,
   funSwap: 0,
   funOwn: false,
+  thread: null,                   /* { owner, date, comments, loading, busy, error } */
+  summary: null,                  /* { months, totals } once the Progress tab is opened */
   exOther: false,                 /* "Other…" free-text entry is open */
   customMinutes: false,           /* typing a duration the chips don't cover */
   cell: null,                     /* { userId, date } open popover */
@@ -88,13 +91,13 @@ async function loadMyProfile() {
 }
 function entryFor(log, ds, userId) { return (log[ds] && log[ds][userId]) || null; }
 
-/* The day the Today tab is showing. Clamped into September and never ahead of
+/* The day the Today tab is showing. Clamped into this month and never ahead of
    today, so you can catch up on a day you missed but not log the future. */
 function viewDate() {
   const t = todayStr();
   const d = ui.viewDate || t;
-  if (d < SEPT_START) return SEPT_START;
-  if (d > t || d > SEPT_END) return t <= SEPT_END ? t : SEPT_END;
+  if (d < monthStart()) return monthStart();
+  if (d > t || d > monthEnd()) return t <= monthEnd() ? t : monthEnd();
   return d;
 }
 
@@ -181,8 +184,8 @@ function signedOut() {
    while the board is still loading. */
 function renderSplash() {
   return `<div class="onboard splash">
-    <h2>September Tracker</h2>
-    <p>30 minutes of exercise and one fun thing, every day of September,
+    <h2>${monthName()} Tracker</h2>
+    <p>30 minutes of exercise and one fun thing, every day of ${monthName()},
        tracked with your friends on a shared board.</p>
     <ul class="splash-list">
       <li>💪 Log what you did, how long it took and how it felt</li>
@@ -259,7 +262,7 @@ function renderOnboard() {
         <input type="text" id="pin-input" inputmode="numeric" maxlength="4"
                value="${esc(d.pin || "")}" placeholder="••••" autocomplete="off">
       </div>
-      <button class="btn primary big" data-action="create-user">Start September</button>
+      <button class="btn primary big" data-action="create-user">Start ${monthName()}</button>
       <p><button class="btn ghost small" data-action="onboard-step" data-val="who">← back</button></p>
     </div>`;
   }
@@ -283,7 +286,7 @@ function renderOnboard() {
 
   return `<div class="onboard">
     <h2>Who are you?</h2>
-    <p class="muted small">30 minutes of exercise + one fun thing, every day of September.</p>
+    <p class="muted small">30 minutes of exercise + one fun thing, every day of ${monthName()}.</p>
     <div class="members">
       ${board.users.map(u =>
         `<button class="btn" data-action="claim" data-id="${u.id}">${u.emoji} ${esc(u.name)}</button>`).join("")}
@@ -298,15 +301,8 @@ function renderToday() {
   const realToday = todayStr();
   const p = myProfile();
   if (!p) return "";
-  const inSept = today >= SEPT_START && today <= SEPT_END;
   const ex = entryFor(exLog, today, me.id);
   const fun = entryFor(funLog, today, me.id);
-
-  if (!inSept) {
-    return `<div class="card"><h2>${esc(prettyDate(today))}</h2>
-      <p class="muted">September's challenge runs 1–30 September 2026.
-      ${today < SEPT_START ? "Not started yet — check the Board tab." : "It's a wrap! See the Board for the final grids."}</p></div>`;
-  }
 
   /* --- exercise card --- */
   let exHtml;
@@ -352,9 +348,9 @@ function renderToday() {
       </div>`;
   } else {
     exHtml = `<div class="chips">
-        ${ACTIVITIES.map(a => a === "Other"
+        ${orderedActivities(board.myActivities).map(a => a === "Other"
           ? `<button class="chip" data-action="toggle-ex-other">Other…</button>`
-          : `<button class="chip" data-action="log-ex" data-activity="${a}">${a}</button>`).join("")}
+          : `<button class="chip" data-action="log-ex" data-activity="${esc(a)}">${esc(a)}</button>`).join("")}
       </div>
       <p class="small muted">Tap what you did — that logs 30 minutes, and you can
         change the time or add a distance afterwards.</p>
@@ -421,7 +417,7 @@ function renderToday() {
     </div>`;
   }).join("");
 
-  const canGoBack = today > SEPT_START;
+  const canGoBack = today > monthStart();
   const canGoForward = today < realToday;
   const dayNav = `<div class="daynav">
       <button class="btn small ghost" data-action="day-back" ${canGoBack ? "" : "disabled"}>←</button>
@@ -556,10 +552,36 @@ function renderGallery() {
       <button class="gopen" data-action="photo-open" data-photo-id="${esc(i.photoId)}"
               data-id="${esc(i.userId)}" data-date="${i.date}">
         <img data-photo="${esc(i.photoId)}" alt="${esc(i.name)}, ${esc(prettyDate(i.date))}">
-        <span class="gcap">${i.emoji} ${septDayNum(i.date)}</span>
+        <span class="gcap">${i.emoji} ${monthDayNum(i.date)}</span>
       </button>
       ${likeButton(i)}
     </div>`).join("")}</div>`;
+}
+
+/* Comments on the open fun day. Loaded on demand rather than ridden along on
+   the board, which every phone refetches each minute — a thread is read by one
+   person at a time and is the wrong thing to broadcast. */
+function renderComments() {
+  const t = ui.thread;
+  if (!t) return "";
+  if (t.loading) return `<div class="thread" data-action="thread-bg"><p class="muted small">Loading…</p></div>`;
+  const rows = (t.comments || []).map(c => `
+    <div class="cmt">
+      <span class="who">${esc(c.emoji || "")} ${esc(c.name)}</span>
+      <span class="body">${esc(c.body)}</span>
+      ${c.user_id === (me && me.id)
+        ? `<button class="cmt-x" data-action="comment-delete" data-id="${c.id}"
+                   aria-label="Delete your comment" title="Delete">×</button>` : ""}
+    </div>`).join("");
+  return `<div class="thread" data-action="thread-bg">
+    ${rows || `<p class="muted small">No comments yet.</p>`}
+    <form class="cmt-add" data-action="comment-add">
+      <input type="text" id="comment-input" maxlength="500" autocomplete="off"
+             placeholder="Say something nice" ${t.busy ? "disabled" : ""}>
+      <button class="btn small primary" type="submit" ${t.busy ? "disabled" : ""}>Post</button>
+    </form>
+    ${t.error ? `<p class="small err">${esc(t.error)}</p>` : ""}
+  </div>`;
 }
 
 function renderLightbox() {
@@ -570,14 +592,21 @@ function renderLightbox() {
      without having to reopen the photo. */
   const live = galleryItems(board.entries, board.users)
     .find(i => i.photoId === lb.photoId) || lb;
+  const n = Number(live.comments || 0);
   return `<div class="lightbox" data-action="photo-close">
     <img data-photo="${esc(lb.photoId)}" alt="">
     <div class="cap">${lb.emoji} ${esc(lb.name)} · ${esc(prettyDate(lb.date))}${
       lb.activity ? " · " + esc(lb.activity) : ""}</div>
     <div class="lb-actions">
       ${likeButton(live, { big: true })}
+      <button class="btn" data-action="comment-toggle"
+              data-id="${esc(lb.userId)}" data-date="${esc(lb.date)}">
+        💬${n ? " " + n : ""}
+      </button>
       <button class="btn" data-action="photo-close">Close</button>
     </div>
+    ${ui.thread && ui.thread.owner === lb.userId && ui.thread.date === lb.date
+      ? renderComments() : ""}
   </div>`;
 }
 
@@ -585,8 +614,8 @@ function renderLightbox() {
 /* When someone joined: clamps to Sept 1, so days before they joined read as
    "not their problem" rather than misses. */
 function joinedOf(u) {
-  const j = u.joined || SEPT_START;
-  return j < SEPT_START ? SEPT_START : j;
+  const j = u.joined || monthStart();
+  return j < monthStart() ? monthStart() : j;
 }
 
 function cellClass(userId, ds, today, since) {
@@ -627,7 +656,7 @@ function boardOrder(today) {
 
 function renderBoard() {
   const today = todayStr();
-  const dates = septDates();
+  const dates = monthDates();
   if (!board.users.length) return `<div class="card"><p class="muted">Nobody's joined yet.</p></div>`;
 
   const ranked = boardOrder(today);
@@ -636,7 +665,7 @@ function renderBoard() {
       const fun = entryFor(funLog, ds, u.id);
       const hasPhoto = !!(photoLog[ds] && photoLog[ds][u.id]);
       return `<button class="cell ${cellClass(u.id, ds, today, since)}" data-action="cell" data-id="${u.id}" data-date="${ds}">
-        ${septDayNum(ds)}${fun && fun.done
+        ${monthDayNum(ds)}${fun && fun.done
           ? `<span class="fun-dot${hasPhoto ? " photo" : ""}"></span>` : ""}
       </button>`;
     }).join("");
@@ -654,7 +683,7 @@ function renderBoard() {
         ${medal ? `<span class="medal" title="${tot} day${tot === 1 ? "" : "s"} logged">${medal}</span>` : ""}
       </div>
       <div class="streaks">
-        <span class="stats">🔥 ${cur} · best ${best} · ${tot}/30</span>
+        <span class="stats">🔥 ${cur} · best ${best} · ${tot}/${monthLength()}</span>
         <span class="stats time">⏱ ${prettyMinutes(totalMinutes(board.entries, u.id))}</span>
         <span class="stats fun">🎉 ${funStreak}</span>
         <span class="stats photo">📸 ${photoStreak}</span>
@@ -791,15 +820,176 @@ function show(id, html) {
   el.classList.remove("hidden");
 }
 
+/* True while someone is typing into any field.
+
+   render() replaces whole views with innerHTML, which destroys and rebuilds
+   every input — wiping what you had typed and dropping the keyboard. That is
+   fine when a render follows a tap, because nothing is half-typed. It is not
+   fine when the 60-second poll fires underneath you.
+
+   It read as "if you type too much on an iPhone it deletes the text", but the
+   trigger is time rather than length: a long entry takes more than a minute to
+   type, the poll lands mid-sentence and the box empties. Phones hit it most
+   because typing is slower and the suggestion bar hides the damage until you
+   look up. */
+function isTyping() {
+  const el = document.activeElement;
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || el.isContentEditable;
+}
+
+/* A poll wanted to redraw while someone was mid-sentence. Hold it, and run it
+   the moment the field loses focus, so the board is never more than a blur
+   behind. */
+let renderDeferred = false;
+function renderUnlessTyping() {
+  if (isTyping()) { renderDeferred = true; return; }
+  render();
+}
+document.addEventListener("focusout", () => {
+  if (!renderDeferred) return;
+  renderDeferred = false;
+  /* let the click that caused the blur land first */
+  setTimeout(() => { if (!isTyping()) render(); }, 150);
+});
+
+/* ---------- progress ---------- */
+
+async function loadSummary() {
+  try {
+    ui.summary = await api.getSummary();
+  } catch (e) {
+    if (isAuthError(e)) return signedOut();
+    ui.summary = { error: true };
+  }
+  renderUnlessTyping();
+}
+
+/* "7h30" reads better than "450 minutes" once the totals get big, but under an
+   hour the minutes are the interesting number. */
+function prettyHours(mins) {
+  const m = Math.round(Number(mins) || 0);
+  if (m < 60) return `${m} min`;
+  const h = Math.floor(m / 60), r = m % 60;
+  return r ? `${h}h${String(r).padStart(2, "0")}` : `${h}h`;
+}
+
+function monthLabel(ym) {
+  const [y, m] = ym.split("-").map(Number);
+  return `${["January","February","March","April","May","June","July",
+             "August","September","October","November","December"][m - 1]} ${y}`;
+}
+
+/* Days in a month that had already happened — so a month still running is
+   measured against the days so far rather than against days nobody could have
+   logged yet. */
+function daysElapsed(ym, today) {
+  const last = Number(monthEnd(ym + "-01").slice(8));
+  if (ym < today.slice(0, 7)) return last;
+  if (ym > today.slice(0, 7)) return 0;
+  return Number(today.slice(8));
+}
+
+function renderProgress() {
+  const s = ui.summary;
+  if (!s) return `<div class="card"><p class="muted">Loading…</p></div>`;
+  if (s.error) return `<div class="card"><p class="muted">Couldn't load your progress.
+    <button class="btn small" data-action="tab" data-tab="progress">Try again</button></p></div>`;
+
+  const today = todayStr();
+  const thisMonth = today.slice(0, 7);
+  const months = (s.months || []).slice().sort((a, b) => b.month.localeCompare(a.month));
+  if (!months.length) {
+    return `<div class="card"><h2>Progress</h2>
+      <p class="muted">Nothing logged yet. Once you've ticked a few days this
+      fills up with how the month went.</p></div>`;
+  }
+
+  const cur = months.find(m => m.month === thisMonth);
+  const prev = months.find(m => m.month < thisMonth);
+  const t = s.totals || {};
+
+  /* The headline: last month in a sentence, which is what was actually asked
+     for. Falls back to this month when there is no history yet. */
+  const lead = prev
+    ? `<div class="card lead">
+         <h2>${esc(monthLabel(prev.month))}</h2>
+         <p class="big">You exercised on <b>${prev.exerciseDays}</b> of
+           ${daysElapsed(prev.month, today)} days and had
+           <b>${prev.funDays}</b> fun ${prev.funDays === 1 ? "day" : "days"}.</p>
+         <p class="muted small">
+           ${prettyHours(prev.minutes)} of exercise${prev.km ? ` · ${prev.km.toFixed(1)} km` : ""}${
+             prev.photos ? ` · ${prev.photos} photo${prev.photos === 1 ? "" : "s"}` : ""}</p>
+       </div>`
+    : "";
+
+  const curDays = daysElapsed(thisMonth, today);
+  const now = `<div class="card">
+      <h3>${esc(monthName())} so far</h3>
+      <p class="big">${cur ? cur.exerciseDays : 0} of ${curDays} days exercised${
+        cur && cur.funDays ? `, ${cur.funDays} fun` : ""}.</p>
+      ${cur && prev ? `<p class="muted small">${
+        comparison(cur, prev, thisMonth, today)}</p>` : ""}
+    </div>`;
+
+  const history = months.length > 1 ? `<div class="card">
+      <h3>Every month</h3>
+      <div class="months">
+        ${months.map(m => `<div class="mrow">
+            <span class="mname">${esc(monthLabel(m.month))}</span>
+            <span class="mbar"><i style="width:${
+              Math.round(100 * m.exerciseDays / Math.max(1, daysElapsed(m.month, today)))}%"></i></span>
+            <span class="mnum">${m.exerciseDays}d · ${m.funDays}🎉</span>
+          </div>`).join("")}
+      </div>
+    </div>` : "";
+
+  const totals = `<div class="card">
+      <h3>All time</h3>
+      <p>${t.exerciseDays || 0} days exercised · ${prettyHours(t.minutes)}${
+        t.km ? ` · ${Number(t.km).toFixed(1)} km` : ""}</p>
+      <p>${t.funDays || 0} fun days · ${t.photos || 0} photos</p>
+      ${(t.likes_received || t.comments_received)
+        ? `<p class="muted small">${t.likes_received || 0} ${
+            (t.likes_received || 0) === 1 ? "like" : "likes"} and ${t.comments_received || 0} ${
+            (t.comments_received || 0) === 1 ? "comment" : "comments"} from the others.</p>` : ""}
+      ${(t.topActivities || []).length
+        ? `<p class="muted small">Mostly ${t.topActivities.map(a =>
+             `${esc(a.activity)} (${a.n})`).join(", ")}.</p>` : ""}
+    </div>`;
+
+  return lead + now + history + totals;
+}
+
+/* One honest sentence about this month against last, compared on rate rather
+   than on count — otherwise the 3rd of the month always looks like a collapse. */
+function comparison(cur, prev, thisMonth, today) {
+  const curDays = daysElapsed(thisMonth, today);
+  const prevDays = daysElapsed(prev.month, today);
+  if (!curDays || !prevDays) return "";
+  const a = cur.exerciseDays / curDays, b = prev.exerciseDays / prevDays;
+  const pct = Math.round(Math.abs(a - b) * 100);
+  if (pct < 5) return `About the same pace as ${monthLabel(prev.month).split(" ")[0]}.`;
+  return a > b
+    ? `That's ${pct} points ahead of ${monthLabel(prev.month).split(" ")[0]}'s pace.`
+    : `That's ${pct} points behind ${monthLabel(prev.month).split(" ")[0]}'s pace.`;
+}
+
 function render() {
-  for (const id of ["view-onboard", "view-today", "view-board", "view-gallery", "view-profile"]) {
+  for (const id of ["view-onboard", "view-today", "view-board", "view-gallery",
+                    "view-progress", "view-profile"]) {
     document.getElementById(id).classList.add("hidden");
   }
   const tabs = document.getElementById("tabs");
   const dayEl = document.getElementById("daycount");
   const today = todayStr();
-  const n = septDayNum(today);
-  dayEl.textContent = n ? `${prettyDate(today)} · day ${n}/30` : prettyDate(today);
+  const n = monthDayNum(today);
+  dayEl.textContent = n ? `${prettyDate(today)} · day ${n}/${monthLength()}` : prettyDate(today);
+  /* The header carries the month, so on the 1st the whole app renames itself
+     without a deploy. */
+  const titleEl = document.getElementById("apptitle");
+  if (titleEl) titleEl.textContent = `${monthName()} Tracker`;
 
   /* Demo: the splash replaces the bare "Loading…" and stays until the visitor
      picks a door. isDemo is only known once the board answers, so a first
@@ -823,6 +1013,7 @@ function render() {
   if (ui.tab === "today") show("view-today", renderToday());
   else if (ui.tab === "board") show("view-board", renderBoard());
   else if (ui.tab === "gallery") show("view-gallery", renderGallery());
+  else if (ui.tab === "progress") show("view-progress", renderProgress());
   else show("view-profile", renderProfile());
 
   /* The lightbox lives outside <main> so switching views doesn't destroy it. */
@@ -864,10 +1055,43 @@ async function upgradeSuggestions() {
 }
 
 /* ---------- actions ---------- */
+/* Enter posts a comment. Delegated like the clicks, because the form is
+   recreated on every render. */
+async function onSubmit(ev) {
+  const form = ev.target.closest('form[data-action="comment-add"]');
+  if (!form) return;
+  ev.preventDefault();
+  const t = ui.thread;
+  const input = document.getElementById("comment-input");
+  if (!t || !input) return;
+  const body = input.value.trim();
+  if (!body || t.busy) return;
+
+  t.busy = true; t.error = ""; render();
+  try {
+    const { comment } = await api.addComment(t.owner, t.date, body);
+    if (ui.thread && ui.thread.owner === t.owner && ui.thread.date === t.date) {
+      ui.thread.comments = [...ui.thread.comments, comment];
+      ui.thread.busy = false;
+    }
+    await refresh();                 /* the board carries the count */
+  } catch (e) {
+    if (isAuthError(e)) return signedOut();
+    if (ui.thread) { ui.thread.busy = false; ui.thread.error = "Couldn't post that"; }
+  }
+  render();
+  /* put the cursor back, so a second comment doesn't need a tap */
+  const again = document.getElementById("comment-input");
+  if (again) again.focus();
+}
+
 async function onClick(ev) {
   const el = ev.target.closest("[data-action]");
   if (!el) return;
   const a = el.dataset.action;
+  /* The lightbox closes on any click inside it, so the comment panel has to
+     absorb its own or reading a thread would shut the photo. */
+  if (a === "thread-bg") return;
   const today = viewDate();          /* log against the day being shown */
 
   if (a === "day-back" || a === "day-forward" || a === "day-today") {
@@ -883,8 +1107,11 @@ async function onClick(ev) {
 
   if (a === "tab") {
     ui.tab = el.dataset.tab;
-    ui.cell = null; ui.lightbox = null; ui.confirmFunClear = null;
+    ui.cell = null; ui.lightbox = null; ui.confirmFunClear = null; ui.thread = null;
     render();
+    /* Fetched on open rather than on a timer: looking back is something you do
+       occasionally, and this is the one call the 60-second poll never makes. */
+    if (ui.tab === "progress") loadSummary();
     return;
   }
 
@@ -959,7 +1186,46 @@ async function onClick(ev) {
     return;
   }
 
-  if (a === "photo-close") { ui.lightbox = null; render(); return; }
+  if (a === "photo-close") { ui.lightbox = null; ui.thread = null; render(); return; }
+
+  /* ---- comments ---- */
+  if (a === "comment-toggle") {
+    const owner = el.dataset.id, date = el.dataset.date;
+    if (ui.thread && ui.thread.owner === owner && ui.thread.date === date) {
+      ui.thread = null; render(); return;
+    }
+    ui.thread = { owner, date, comments: [], loading: true, busy: false, error: "" };
+    render();
+    try {
+      const { comments } = await api.getComments(owner, date);
+      if (ui.thread && ui.thread.owner === owner && ui.thread.date === date) {
+        ui.thread.comments = comments; ui.thread.loading = false;
+      }
+    } catch (e) {
+      if (isAuthError(e)) return signedOut();
+      if (ui.thread) { ui.thread.loading = false; ui.thread.error = "Couldn't load the comments"; }
+    }
+    render();
+    return;
+  }
+  if (a === "comment-delete") {
+    const id = Number(el.dataset.id);
+    const t = ui.thread;
+    if (!t) return;
+    const before = t.comments;
+    t.comments = t.comments.filter(c => Number(c.id) !== id);   /* optimistic */
+    render();
+    try {
+      await api.deleteComment(id);
+      await refresh();                 /* the board carries the count */
+    } catch (e) {
+      if (isAuthError(e)) return signedOut();
+      t.comments = before;
+      toast("Couldn't delete that");
+    }
+    renderUnlessTyping();
+    return;
+  }
 
   if (a === "like") {
     /* Inside the lightbox the backdrop closes the photo, so a like tap must
@@ -1373,20 +1639,23 @@ async function onPhotoPicked(ev) {
 async function boot() {
   try { me = JSON.parse(localStorage.getItem(ME_KEY) || "null"); } catch { me = null; }
   document.addEventListener("click", onClick);
+  document.addEventListener("submit", onSubmit);
   document.getElementById("photo-input").addEventListener("change", onPhotoPicked);
   render();
   await refresh();
   if (me && getUser(me.id)) { await loadMyProfile(); loadSuggestions(); }
   render();
 
-  /* cheap multiplayer: refetch when the tab regains focus and every 60s */
+  /* cheap multiplayer: refetch when the tab regains focus and every 60s.
+     Both paths redraw through renderUnlessTyping, so a background update can
+     never empty a box someone is still typing into. */
   document.addEventListener("visibilitychange", async () => {
-    if (!document.hidden && me) { await refresh(); render(); }
+    if (!document.hidden && me) { await refresh(); renderUnlessTyping(); }
   });
   setInterval(async () => {
     /* Never re-render underneath an upload or a pending draft. */
     if (ui.photoBusy || ui.photoDraft) return;
-    if (!document.hidden && me && !ui.needPasscode) { await refresh(); render(); }
+    if (!document.hidden && me && !ui.needPasscode) { await refresh(); renderUnlessTyping(); }
   }, 60000);
 }
 

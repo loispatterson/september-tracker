@@ -4,6 +4,7 @@ const { runSelfTests } = await import("../js/selftests.js");
 const { hashPin, verifyPin, validPin, newToken } = await import("../api/_lib/auth.js");
 const { validatePhoto, newPhotoId, b64Bytes, stripDataUrl, validPhotoDate, MAX_B64 } =
   await import("../api/_lib/photos.js");
+const { validEntryDate } = await import("../api/_lib/month.js");
 
 let { pass, fail } = runSelfTests();
 const check = (label, got, want) => {
@@ -31,9 +32,12 @@ check("tokens are unique", t1 === t2, false);
 check("tokens are long enough", t1.length >= 32, true);
 
 /* ---- photo validation: the server's rules, which the client assumes ---- */
-const ok = { date: "2026-09-05", mime: "image/jpeg", b64: "AAAA" };
+/* The accepted window follows the calendar now, so build the valid date
+   from today rather than naming September. */
+const thisMonth = new Date().toISOString().slice(0, 7);
+const ok = { date: `${thisMonth}-05`, mime: "image/jpeg", b64: "AAAA" };
 check("valid photo passes", validatePhoto(ok), null);
-check("date outside September rejected", validatePhoto({ ...ok, date: "2026-10-01" }).status, 400);
+check("date outside the window rejected", validatePhoto({ ...ok, date: "2020-01-05" }).status, 400);
 check("malformed date rejected", validatePhoto({ ...ok, date: "5th Sept" }).status, 400);
 check("unsupported mime rejected", validatePhoto({ ...ok, mime: "image/heic" }).status, 400);
 check("missing data rejected", validatePhoto({ ...ok, b64: "" }).status, 400);
@@ -42,8 +46,18 @@ check("oversized photo gets 413", validatePhoto({ ...ok, b64: "A".repeat(MAX_B64
 check("non-base64 rejected before SQL", validatePhoto({ ...ok, b64: "not base64!!" }).status, 400);
 check("padded base64 accepted", validatePhoto({ ...ok, b64: "QUJD=" }), null);
 
-check("validPhotoDate boundaries", [validPhotoDate("2026-09-01"), validPhotoDate("2026-09-30"),
-  validPhotoDate("2026-08-31"), validPhotoDate("2026-10-01")], [true, true, false, false]);
+{
+  /* a fixed clock, so these assert the rule rather than today's date */
+  const now = new Date("2026-10-15T12:00:00Z");
+  check("accepts this month", validEntryDate("2026-10-01", now), true);
+  check("accepts last month", validEntryDate("2026-09-30", now), true);
+  check("rejects older", validEntryDate("2026-08-31", now), false);
+  check("rejects next month", validEntryDate("2026-11-01", now), false);
+  check("rejects malformed", validEntryDate("5th Oct", now), false);
+  /* on the 1st, yesterday is last month — the reason the window is two wide */
+  check("backfilling yesterday works on the 1st",
+    validEntryDate("2026-10-31", new Date("2026-11-01T00:30:00Z")), true);
+}
 check("photo ids are prefixed", newPhotoId().startsWith("p_"), true);
 check("photo ids are unique", newPhotoId() === newPhotoId(), false);
 check("stripDataUrl removes the prefix", stripDataUrl("data:image/jpeg;base64,QUJD"), "QUJD");

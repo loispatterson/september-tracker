@@ -30,5 +30,9 @@ export const FUN_PROMPTS = [
   "Host or join a themed dinner (colour, country, decade)",
   "Try origami — make at least one crane",
   "Museum, gallery or library visit — even 30 minutes",
-  "Plan a micro-adventure for October",
+  "Plan a micro-adventure for next month",
+  "Light a fire or candles and read by them",
+  "Watch the sunrise for once, instead of the sunset",
+  "Cook something from a country you've never visited",
+  "Sit somewhere with a view and do nothing for ten minutes",
 ];

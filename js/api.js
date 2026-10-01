@@ -49,6 +49,11 @@ export const api = {
   uploadPhoto: (photo) => post("/api/photo", photo),
   deletePhoto: (date) => request(`/api/photo?date=${encodeURIComponent(date)}`, { method: "DELETE" }),
   toggleLike: (photoId) => post("/api/like", { photoId }),
+  getSummary: () => request("/api/summary"),
+  getComments: (owner, date) =>
+    request(`/api/comment?owner=${encodeURIComponent(owner)}&date=${encodeURIComponent(date)}`),
+  addComment: (owner, date, body) => post("/api/comment", { owner, date, body }),
+  deleteComment: (id) => post("/api/comment", { id, delete: true }),
 };
 
 /* Photo bytes come back as a blob, not JSON, and the passcode travels in a

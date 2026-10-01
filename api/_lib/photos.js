@@ -1,3 +1,4 @@
+import { validEntryDate, ENTRY_DATE_ERROR } from "./month.js";
 /* Photo rules. No DB, no dependencies — imported by the API handler, the local
    dev server and the tests, so client and server can't disagree about what a
    valid photo is. */
@@ -24,7 +25,7 @@ export function b64Bytes(b64) {
 }
 
 export function validPhotoDate(date) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(date || "") && date >= "2026-09-01" && date <= "2026-09-30";
+  return validEntryDate(date);
 }
 
 export function newPhotoId() {
@@ -33,7 +34,7 @@ export function newPhotoId() {
 
 /* Returns null when the photo is acceptable, else { status, error }. */
 export function validatePhoto({ date, mime, b64 }) {
-  if (!validPhotoDate(date)) return { status: 400, error: "date must be in September 2026" };
+  if (!validPhotoDate(date)) return { status: 400, error: ENTRY_DATE_ERROR };
   if (!MIMES.includes(mime)) return { status: 400, error: "unsupported image type" };
   const s = String(b64 || "");
   if (!s) return { status: 400, error: "no image data" };

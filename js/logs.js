@@ -1,3 +1,33 @@
+export const DEFAULT_ACTIVITIES =
+  ["Run", "Walk", "Gym", "Cycle", "Swim", "Yoga", "Class", "Other"];
+
+/* The chip row, ordered by what this person actually does.
+
+   Counts come from the server across every month, not just the one on screen,
+   so on the 1st your habits carry over instead of the list resetting to the
+   stock order. Anything logged through "Other…" earns its own chip once it has
+   been used, which is the point: someone who does bouldering should not have
+   to retype it every time.
+
+   Defaults never disappear — they fall in behind what you use, so the list
+   stays a menu rather than a history. "Other" is pinned last. */
+export function orderedActivities(counts, defaults = DEFAULT_ACTIVITIES, limit = 10) {
+  const used = (counts || [])
+    .map(c => ({ name: String(c.activity).trim(), n: Number(c.n) || 0 }))
+    .filter(c => c.name && c.name.toLowerCase() !== "other");
+  const seen = new Map();
+  for (const c of used) {                       /* fold case-variant duplicates */
+    const k = c.name.toLowerCase();
+    const prev = seen.get(k);
+    if (!prev || c.n > prev.n) seen.set(k, c);
+    else prev.n += c.n;
+  }
+  const mine = [...seen.values()].sort((a, b) => b.n - a.n).map(c => c.name);
+  const rest = defaults.filter(a =>
+    a !== "Other" && !seen.has(a.toLowerCase()));
+  return [...mine, ...rest].slice(0, limit).concat("Other");
+}
+
 /* Turn the board's flat entries array into the per-date lookups the views and
    the streak engine use. Pure, so it can be tested without a browser. */
 

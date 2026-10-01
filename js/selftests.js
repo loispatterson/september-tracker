@@ -1,13 +1,15 @@
 /* Self-tests — run in devtools:
      import("/js/selftests.js").then(m => m.runSelfTests())
    Pure logic only; no network, no DOM. */
-import { addDays, prettyDate, septDates, septDayNum, SEPT_START, SEPT_END } from "./dates.js";
+import { FUN_PROMPTS } from "./data/fun-prompts.js";
+import { addDays, prettyDate, monthDates, monthDayNum, monthStart, monthEnd,
+         monthLength, monthName, monthOf } from "./dates.js";
 import { currentStreak, bestStreak, totalHits, dayResult, HIT, MISS, PENDING, NEUTRAL } from "./streaks.js";
 import { pickWorkouts, hashStr, needsEasyDay } from "./suggestions.js";
 import { expandAgeBand } from "./profile.js";
 import { WORKOUTS } from "./data/workouts.js";
 import { funPromptFor, funPool } from "./fun.js";
-import { buildLogs, minutesOf, prettyMinutes, describeEntry, totalMinutes, feelingLabel } from "./logs.js";
+import { orderedActivities, DEFAULT_ACTIVITIES, buildLogs, minutesOf, prettyMinutes, describeEntry, totalMinutes, feelingLabel } from "./logs.js";
 import { readExifOrientation, orientationTransform, fitDimensions, galleryItems } from "./imageutil.js";
 
 export function runSelfTests() {
@@ -22,10 +24,17 @@ export function runSelfTests() {
   check("addDays back over month edge", addDays("2026-09-01", -1), "2026-08-31");
   check("addDays month end", addDays("2026-09-30", 1), "2026-10-01");
   check("prettyDate", prettyDate("2026-09-01"), "Tue 1 Sep");
-  check("septDates length", septDates().length, 30);
-  check("septDates first/last", [septDates()[0], septDates()[29]], [SEPT_START, SEPT_END]);
-  check("septDayNum inside", septDayNum("2026-09-14"), 14);
-  check("septDayNum outside", septDayNum("2026-08-31"), null);
+  /* The window follows the calendar now, so assert the shape rather than
+     September's 30 days: the grid must start on the 1st, end on the real last
+     day of the month, and have no gaps. */
+  check("monthDates length", monthDates("2026-10-05").length, 31);
+  check("monthDates Feb is short", monthDates("2027-02-10").length, 28);
+  check("monthDates first/last",
+        [monthDates("2026-10-05")[0], monthDates("2026-10-05").at(-1)],
+        ["2026-10-01", "2026-10-31"]);
+  check("monthDayNum inside", monthDayNum("2026-10-14", "2026-10-01"), 14);
+  check("monthDayNum other month", monthDayNum("2026-09-30", "2026-10-01"), null);
+  check("monthLength Oct", monthLength("2026-10-05"), 31);
 
   /* ---- streaks: log[date][userId] ---- */
   const U = "u_1", V = "u_2";
@@ -42,7 +51,7 @@ export function runSelfTests() {
   check("dayResult unlogged past day is miss", dayResult(V, log, "2026-09-02", today), MISS);
   check("dayResult today unlogged is pending", dayResult(U, log, today, today), PENDING);
   check("dayResult future is neutral", dayResult(U, log, "2026-09-10", today), NEUTRAL);
-  check("dayResult outside September", dayResult(U, log, "2026-08-31", today), NEUTRAL);
+  check("dayResult outside the month", dayResult(U, log, "2026-08-31", today), NEUTRAL);
   check("currentStreak survives pending today", currentStreak(U, log, today), 1);
   check("currentStreak unbroken run", currentStreak(V, log, today), 3);
   check("bestStreak U", bestStreak(U, log, today), 2);
@@ -75,19 +84,19 @@ export function runSelfTests() {
     picks.every(w => w.intensity !== "high"), true);
   check("deterministic for same date",
     pickWorkouts(prof, "2026-09-01", [], WORKOUTS).map(w => w.id), picks.map(w => w.id));
-  const sets = new Set(septDates().map(ds => pickWorkouts(prof, ds, [], WORKOUTS).map(w => w.id).join(",")));
+  const sets = new Set(monthDates("2026-10-01").map(ds => pickWorkouts(prof, ds, [], WORKOUTS).map(w => w.id).join(",")));
   check("varies across the month", sets.size >= 10, true);
   /* Ranking strictly by goal match pinned the same top three to every day and
      handed identical lists to different people; weighting instead fixed it. */
   check("consecutive days usually differ",
-    septDates().slice(0, 10).filter((ds, i, a) =>
+    monthDates("2026-10-01").slice(0, 10).filter((ds, i, a) =>
       i > 0 && pickWorkouts(prof, ds, [], WORKOUTS).map(w => w.id).join() ===
                pickWorkouts(prof, a[i - 1], [], WORKOUTS).map(w => w.id).join()).length <= 3, true);
   check("two people with the same profile get different picks",
     pickWorkouts({ ...prof, id: "u_twin" }, "2026-09-03", [], WORKOUTS).map(w => w.id).join() !==
     pickWorkouts(prof, "2026-09-03", [], WORKOUTS).map(w => w.id).join(), true);
   check("every pick all month still serves a stated goal",
-    septDates().every(ds => pickWorkouts(prof, ds, [], WORKOUTS)
+    monthDates("2026-10-01").every(ds => pickWorkouts(prof, ds, [], WORKOUTS)
       .every(w => w.goals.some(g => prof.goals.includes(g)))), true);
 
   /* multi-goal: a workout serving both goals should outrank one serving either */
@@ -173,21 +182,61 @@ export function runSelfTests() {
       "2026-09-10", [], WORKOUTS, { yesterdayMinutes: 300 }).length, 3);
 
   /* ---- fun prompts ---- */
-  check("pool includes curated + db", funPool([{ text: "x" }]).length, 31);
+  check("pool includes curated + db", funPool([{ text: "x" }]).length, FUN_PROMPTS.length + 1);
+  /* a 31-day month needs at least 31 cards, or someone gets a repeat */
+  check("pool covers the longest month", funPool([]).length >= 31, true);
   const f1 = funPromptFor(U, "2026-09-01", []);
   check("fun prompt deterministic", funPromptFor(U, "2026-09-01", []), f1);
   check("fun prompt differs per user", funPromptFor(V, "2026-09-01", []) !== f1, true);
   check("swap changes the idea", funPromptFor(U, "2026-09-01", [], 1) !== f1, true);
-  check("swap wraps around", funPromptFor(U, "2026-09-01", [], 30), f1);
-  /* the deck is the point: 30 days, 30 different ideas, none repeated */
-  const month = septDates().map(ds => funPromptFor(U, ds, []));
-  check("30 distinct ideas across September", new Set(month).size, 30);
-  check("deck is a permutation of the pool",
-    month.slice().sort().join("|"), funPool([]).slice().sort().join("|"));
+  check("swap wraps around", funPromptFor(U, "2026-09-01", [], funPool([]).length), f1);
+  /* the deck is the point: a different idea every day of the month */
+  const month = monthDates("2026-10-01").map(ds => funPromptFor(U, ds, []));
+  check("no repeated idea in a 31-day month", new Set(month).size, month.length);
+  check("every dealt idea comes from the pool",
+    month.every(t => funPool([]).includes(t)), true);
   check("user-added ideas join the deck",
     funPromptFor(U, "2026-09-01", [{ text: "z" }]) !== undefined, true);
   check("decks differ between users",
-    septDates().map(ds => funPromptFor(V, ds, [])).join("|") !== month.join("|"), true);
+    monthDates("2026-10-01").map(ds => funPromptFor(V, ds, [])).join("|") !== month.join("|"), true);
+
+  /* ---- the rolling month ---- */
+  /* These are the regression tests for the September-to-October move: the
+     window has to follow the calendar, and streaks have to restart because
+     they are bounded by it. */
+  check("month boundaries from any day in it",
+    [monthStart("2026-10-17"), monthEnd("2026-10-17")], ["2026-10-01", "2026-10-31"]);
+  check("30-day months", monthEnd("2026-11-09"), "2026-11-30");
+  check("leap February", monthEnd("2028-02-03"), "2028-02-29");
+  check("month name", monthName("2026-10-01"), "October");
+  /* A September streak must not carry into October. */
+  const sepLog = {};
+  for (const ds of monthDates("2026-09-01")) sepLog[ds] = { [U]: { done: true } };
+  check("September streak stays in September",
+    currentStreak(U, sepLog, "2026-09-30"), 30);
+  check("a new month starts everyone at zero",
+    currentStreak(U, sepLog, "2026-10-01"), 0);
+  check("last month's days don't count toward this month's total",
+    totalHits(U, sepLog, "2026-10-05"), 0);
+
+  /* ---- activity ordering ---- */
+  check("no history keeps the stock order",
+    orderedActivities([]).slice(0, 3), ["Run", "Walk", "Gym"]);
+  check("Other is always last", orderedActivities([]).at(-1), "Other");
+  check("most logged comes first",
+    orderedActivities([{ activity: "Swim", n: 9 }, { activity: "Run", n: 2 }])[0], "Swim");
+  check("a free-text activity earns a chip",
+    orderedActivities([{ activity: "Bouldering", n: 4 }])[0], "Bouldering");
+  check("defaults fall in behind, none lost",
+    orderedActivities([{ activity: "Swim", n: 9 }]).includes("Yoga"), true);
+  check("case variants fold together",
+    orderedActivities([{ activity: "run", n: 3 }, { activity: "Run", n: 1 }])
+      .filter(a => a.toLowerCase() === "run").length, 1);
+  check("an Other row never becomes a chip of its own",
+    orderedActivities([{ activity: "Other", n: 5 }]).filter(a => a === "Other").length, 1);
+  check("the list stays a sensible length",
+    orderedActivities(Array.from({ length: 30 },
+      (_, i) => ({ activity: "A" + i, n: 30 - i }))).length, 11);
 
   /* ---- buildLogs + the photo streak ---- */
   const P = "u_p";

@@ -1,6 +1,6 @@
 import { FUN_PROMPTS } from "./data/fun-prompts.js";
 import { hashStr } from "./suggestions.js";
-import { septDayNum } from "./dates.js";
+import { monthDayNum } from "./dates.js";
 
 /* Pool = curated prompts + user-added ideas from the DB. */
 export function funPool(dbIdeas) {
@@ -36,6 +36,6 @@ export function funDeck(userId, dbIdeas) {
 export function funPromptFor(userId, dateStr, dbIdeas, swapOffset = 0) {
   const deck = funDeck(userId, dbIdeas);
   if (!deck.length) return "";
-  const day = (septDayNum(dateStr) || 1) - 1;
+  const day = (monthDayNum(dateStr, dateStr) || 1) - 1;
   return deck[(day + swapOffset) % deck.length];
 }

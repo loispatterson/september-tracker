@@ -1,4 +1,5 @@
 import { sql, endpoint } from "./_lib/db.js";
+import { validEntryDate } from "./_lib/month.js";
 import { newToken, hashPin } from "./_lib/auth.js";
 
 /* POST /api/demo → a throwaway account, pre-filled, signed straight in.
@@ -55,7 +56,7 @@ export default endpoint(async (req, res) => {
     const d = new Date(today);
     d.setDate(d.getDate() - back);
     const ds = iso(d);
-    if (ds < "2026-09-01" || ds > "2026-09-30") continue;
+    if (!validEntryDate(ds)) continue;   /* a throwaway account only gets this month */
     if (back === 3) continue;                       /* one missed day */
     days.push({ ds, back });
   }
