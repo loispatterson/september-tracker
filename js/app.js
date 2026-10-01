@@ -413,8 +413,12 @@ function renderToday() {
       ${photoSection(today, null)}`;
   }
 
-  /* --- friends strip --- */
-  const friends = board.users.map(u => {
+  /* --- friends strip ---
+     Same three-week rule as the board. A strip of ⬜⬜ from people who stopped
+     in week one makes today look like nobody is doing this. */
+  const { shown: activeToday, hidden: quietToday } =
+    activeUsers(board.users, realToday, me && me.id, ui.showAll);
+  const friends = activeToday.map(u => {
     const e = entryFor(exLog, today, u.id), f = entryFor(funLog, today, u.id);
     return `<div class="friend-row">
       <span>${u.emoji}</span>
@@ -447,7 +451,9 @@ function renderToday() {
     <div class="card">
       <h2>Everyone today</h2>
       <div class="friends">${friends}</div>
-      <p class="small muted" style="margin-bottom:0">✅ exercise · 🎉 fun</p>
+      <p class="small muted" style="margin-bottom:0">✅ exercise · 🎉 fun${
+        quietToday.length ? ` · <button class="linkish" data-action="show-all">+${
+          quietToday.length} quiet</button>` : ""}</p>
     </div>`;
 }
 
@@ -534,10 +540,16 @@ function renderGallery() {
   const filter = photographers.some(u => u.id === ui.galleryUser) ? ui.galleryUser : null;
   const items = filter ? all.filter(i => i.userId === filter) : all;
 
-  const mine = me ? currentStreak(me.id, photoLog, todayStr(), joinedOf(getUser(me.id) || {})) : 0;
-  const myTotal = me ? totalHits(me.id, photoLog, todayStr(), joinedOf(getUser(me.id) || {})) : 0;
+  /* Scored against the month on screen, like the board, so paging back to
+     September shows September's streak rather than today's. */
+  const ref = viewMonth() + "-01";
+  const since = me ? joinedOf(getUser(me.id) || {}, ref) : null;
+  const mine = me ? currentStreak(me.id, photoLog, todayStr(), since, ref) : 0;
+  const myTotal = me ? totalHits(me.id, photoLog, todayStr(), since, ref) : 0;
 
-  const header = `<div class="card">
+  /* Same pager as the Board, and the same `ui.month`, so paging back on one
+     tab and switching to the other keeps you in the month you were looking at. */
+  const header = monthNav() + `<div class="card">
     <h2>📸 Photos</h2>
     <p class="small">You: 📸 ${mine} in a row, ${myTotal} photo${myTotal === 1 ? "" : "s"}.
       ${all.length} in all from ${photographers.length} ${photographers.length === 1 ? "person" : "people"}.</p>
@@ -551,7 +563,9 @@ function renderGallery() {
   </div>`;
 
   if (!items.length) {
-    return header + `<div class="card"><p class="muted">No photos yet. Add one from Today.</p></div>`;
+    const thisMonth = viewMonth() === monthOf(todayStr());
+    return header + `<div class="card"><p class="muted">No photos in ${
+      esc(monthName(ref))}${thisMonth ? " yet. Add one from Today." : "."}</p></div>`;
   }
 
   return header + `<div class="gallery">${items.map(i => `
@@ -559,7 +573,7 @@ function renderGallery() {
       <button class="gopen" data-action="photo-open" data-photo-id="${esc(i.photoId)}"
               data-id="${esc(i.userId)}" data-date="${i.date}">
         <img data-photo="${esc(i.photoId)}" alt="${esc(i.name)}, ${esc(prettyDate(i.date))}">
-        <span class="gcap">${i.emoji} ${monthDayNum(i.date)}</span>
+        <span class="gcap">${i.emoji} ${monthDayNum(i.date, i.date)}</span>
       </button>
       ${likeButton(i)}
     </div>`).join("")}</div>`;
