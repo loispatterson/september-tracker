@@ -447,3 +447,17 @@ nav.tabs button.on { color: var(--accent); font-weight: 600; }
   background: none; border: 0; padding: 0; font: inherit;
   color: var(--accent); text-decoration: underline; cursor: pointer;
 }
+
+/* The thread styles are written for the dark lightbox; inside a card it needs
+   the page's own colours instead. */
+.thread-inline .thread {
+  max-height: none; width: 100%;
+  background: var(--page); border-color: var(--border); color: var(--ink);
+}
+.thread-inline .thread .muted { color: var(--muted); }
+.thread-inline .cmt-x { color: var(--muted); }
+.thread-inline .cmt-x:hover { background: var(--border); color: var(--ink); }
+.thread-inline .cmt-add input {
+  background: var(--surface); color: var(--ink); border-color: var(--border);
+}
+.thread-inline .cmt-add input::placeholder { color: var(--muted); }

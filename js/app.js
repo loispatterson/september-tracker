@@ -773,6 +773,19 @@ function cellPanel(u, ds, today) {
           data-action="photo-open" data-photo-id="${esc(fun.photo_id)}"
           data-id="${esc(u.id)}" data-date="${ds}" alt="Photo from ${esc(u.name)}">` : ""}
     ${editable ? photoSection(ds, fun, { compact: true }) : ""}
+    ${/* Comments live on the day, not on the picture, so they have to be
+          reachable from the cell as well as from the lightbox — a fun day
+          with no photo had no way in at all. */
+      fun && fun.done ? `<div class="row">
+        <button class="btn small ghost" data-action="comment-toggle"
+                data-id="${esc(u.id)}" data-date="${ds}">
+          💬 ${Number(fun.comments || 0) || ""} ${
+            ui.thread && ui.thread.owner === u.id && ui.thread.date === ds
+              ? "Hide comments" : "Comments"}
+        </button>
+      </div>
+      ${ui.thread && ui.thread.owner === u.id && ui.thread.date === ds
+        ? `<div class="thread-inline">${renderComments()}</div>` : ""}` : ""}
     ${editable ? `<div class="row">
       ${ex && ex.done
         ? `<button class="btn small" data-action="backfill" data-date="${ds}" data-kind="exercise" data-done="0">Clear exercise</button>`
