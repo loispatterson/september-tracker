@@ -261,6 +261,41 @@ async function apiRoute(req, res, path, q) {
     return send(res, 200, { ok: true });
   }
 
+  if (path === "/api/me" && req.method === "GET" && q.get("view") === "summary") {
+    const me = d.sessions[req.headers["x-user-token"]];
+    if (!me) return send(res, 401, { error: "auth" });
+    const mine = d.entries.filter(e => e.user_id === me && e.done);
+    const by = {};
+    for (const e of mine) {
+      const m = (by[e.date.slice(0, 7)] ||= {
+        month: e.date.slice(0, 7), exerciseDays: 0, funDays: 0, minutes: 0, km: 0, photos: 0 });
+      if (e.kind === "exercise") { m.exerciseDays++; m.minutes += Number(e.minutes) || 0;
+                                   m.km += Number(e.distance_km) || 0; }
+      else m.funDays++;
+    }
+    for (const key of Object.keys(d.photos)) {
+      const [uid, date] = key.split("|");
+      if (uid === me && by[date.slice(0, 7)]) by[date.slice(0, 7)].photos++;
+    }
+    const months = Object.values(by).sort((a, b) => a.month.localeCompare(b.month));
+    const totals = months.reduce((t, m) => ({
+      exerciseDays: t.exerciseDays + m.exerciseDays, funDays: t.funDays + m.funDays,
+      minutes: t.minutes + m.minutes, km: t.km + m.km, photos: t.photos + m.photos,
+    }), { exerciseDays: 0, funDays: 0, minutes: 0, km: 0, photos: 0 });
+    const counts = mine.filter(e => e.kind === "exercise" && e.activity)
+      .reduce((m, e) => ({ ...m, [e.activity]: (m[e.activity] || 0) + 1 }), {});
+    return send(res, 200, {
+      months,
+      totals: {
+        ...totals,
+        comments_received: (d.comments || []).filter(c => c.owner_id === me).length,
+        likes_received: 0,
+        topActivities: Object.entries(counts).map(([activity, n]) => ({ activity, n }))
+          .sort((a, b) => b.n - a.n).slice(0, 3),
+      },
+    });
+  }
+
   if (path === "/api/me" && req.method === "GET") {
     if (!userId) return needAuth();
     const u = d.users.find(x => x.id === userId);
@@ -375,41 +410,6 @@ async function apiRoute(req, res, path, q) {
     };
     d.comments.push(row); await put(d);
     return send(res, 200, { comment: { ...row, name: u.name, emoji: u.emoji } });
-  }
-
-  if (path === "/api/summary" && req.method === "GET") {
-    const me = d.sessions[req.headers["x-user-token"]];
-    if (!me) return send(res, 401, { error: "auth" });
-    const mine = d.entries.filter(e => e.user_id === me && e.done);
-    const by = {};
-    for (const e of mine) {
-      const m = (by[e.date.slice(0, 7)] ||= {
-        month: e.date.slice(0, 7), exerciseDays: 0, funDays: 0, minutes: 0, km: 0, photos: 0 });
-      if (e.kind === "exercise") { m.exerciseDays++; m.minutes += Number(e.minutes) || 0;
-                                   m.km += Number(e.distance_km) || 0; }
-      else m.funDays++;
-    }
-    for (const key of Object.keys(d.photos)) {
-      const [uid, date] = key.split("|");
-      if (uid === me && by[date.slice(0, 7)]) by[date.slice(0, 7)].photos++;
-    }
-    const months = Object.values(by).sort((a, b) => a.month.localeCompare(b.month));
-    const totals = months.reduce((t, m) => ({
-      exerciseDays: t.exerciseDays + m.exerciseDays, funDays: t.funDays + m.funDays,
-      minutes: t.minutes + m.minutes, km: t.km + m.km, photos: t.photos + m.photos,
-    }), { exerciseDays: 0, funDays: 0, minutes: 0, km: 0, photos: 0 });
-    const counts = mine.filter(e => e.kind === "exercise" && e.activity)
-      .reduce((m, e) => ({ ...m, [e.activity]: (m[e.activity] || 0) + 1 }), {});
-    return send(res, 200, {
-      months,
-      totals: {
-        ...totals,
-        comments_received: (d.comments || []).filter(c => c.owner_id === me).length,
-        likes_received: 0,
-        topActivities: Object.entries(counts).map(([activity, n]) => ({ activity, n }))
-          .sort((a, b) => b.n - a.n).slice(0, 3),
-      },
-    });
   }
 
   if (path === "/api/fun-ideas" && req.method === "POST") {

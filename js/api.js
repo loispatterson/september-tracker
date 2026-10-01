@@ -49,7 +49,7 @@ export const api = {
   uploadPhoto: (photo) => post("/api/photo", photo),
   deletePhoto: (date) => request(`/api/photo?date=${encodeURIComponent(date)}`, { method: "DELETE" }),
   toggleLike: (photoId) => post("/api/like", { photoId }),
-  getSummary: () => request("/api/summary"),
+  getSummary: () => request("/api/me?view=summary"),
   getComments: (owner, date) =>
     request(`/api/comment?owner=${encodeURIComponent(owner)}&date=${encodeURIComponent(date)}`),
   addComment: (owner, date, body) => post("/api/comment", { owner, date, body }),
