@@ -1029,10 +1029,12 @@ function render() {
   const today = todayStr();
   const n = monthDayNum(today);
   dayEl.textContent = n ? `${prettyDate(today)} · day ${n}/${monthLength()}` : prettyDate(today);
-  /* The header carries the month, so on the 1st the whole app renames itself
-     without a deploy. */
+  /* The header and the browser tab both carry the month, so on the 1st the
+     whole app renames itself without a deploy. The tab matters more than it
+     looks: added to a phone's home screen, this is the name under the icon. */
   const titleEl = document.getElementById("apptitle");
   if (titleEl) titleEl.textContent = `${monthName()} Tracker`;
+  document.title = `${monthName()} Tracker`;
 
   /* Demo: the splash replaces the bare "Loading…" and stays until the visitor
      picks a door. isDemo is only known once the board answers, so a first
