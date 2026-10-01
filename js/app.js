@@ -614,6 +614,7 @@ function renderLightbox() {
   const live = galleryItems(board.entries, board.users)
     .find(i => i.photoId === lb.photoId) || lb;
   const n = Number(live.comments || 0);
+  const open = !!(ui.thread && ui.thread.owner === lb.userId && ui.thread.date === lb.date);
   return `<div class="lightbox" data-action="photo-close">
     <img data-photo="${esc(lb.photoId)}" alt="">
     <div class="cap">${lb.emoji} ${esc(lb.name)} · ${esc(prettyDate(lb.date))}${
@@ -621,13 +622,12 @@ function renderLightbox() {
     <div class="lb-actions">
       ${likeButton(live, { big: true })}
       <button class="btn" data-action="comment-toggle"
-              data-id="${esc(lb.userId)}" data-date="${esc(lb.date)}">
-        💬${n ? " " + n : ""}
+              data-id="${esc(lb.userId || "")}" data-date="${esc(lb.date)}">
+        💬 ${open ? "Hide" : (n ? n + (n === 1 ? " comment" : " comments") : "Comment")}
       </button>
       <button class="btn" data-action="photo-close">Close</button>
     </div>
-    ${ui.thread && ui.thread.owner === lb.userId && ui.thread.date === lb.date
-      ? renderComments() : ""}
+    ${open ? renderComments() : ""}
   </div>`;
 }
 
@@ -1267,7 +1267,10 @@ async function onClick(ev) {
     const ds = el.dataset.date;
     const fun = entryFor(funLog, ds, el.dataset.id);
     ui.lightbox = {
-      photoId: el.dataset.photoId, name: u.name || "", emoji: u.emoji || "",
+      /* userId matters as much as the photo id: comments are keyed on whose
+         day it is, and without it the comment button posts an empty owner. */
+      photoId: el.dataset.photoId, userId: el.dataset.id,
+      name: u.name || "", emoji: u.emoji || "",
       date: ds, activity: (fun && fun.activity) || "",
     };
     render();
