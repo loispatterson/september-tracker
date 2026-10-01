@@ -49,8 +49,14 @@ export function monthDates(ds = todayStr()) {
   for (let d = monthStart(ds); d <= end; d = addDays(d, 1)) out.push(d);
   return out;
 }
-/* 1-based day number within its own month, or null if the date is outside the
-   month we are currently showing. */
-export function monthDayNum(ds, ref = todayStr()) {
-  return monthOf(ds) === monthOf(ref) ? Number(ds.slice(8)) : null;
+/* 1-based day number within its own month.
+
+   `ref` asks a different question — "is this date in the month I am showing?"
+   — and returns null when it is not. That is what the header needs, and it is
+   a trap everywhere else: a grid of September cells rendered in October asked
+   the default and every cell read "null". Pass the date itself, or nothing at
+   all, when you just want the number. */
+export function monthDayNum(ds, ref = null) {
+  if (ref && monthOf(ds) !== monthOf(ref)) return null;
+  return Number(ds.slice(8));
 }

@@ -36,6 +36,11 @@ export function runSelfTests() {
         ["2026-10-01", "2026-10-31"]);
   check("monthDayNum inside", monthDayNum("2026-10-14", "2026-10-01"), 14);
   check("monthDayNum other month", monthDayNum("2026-09-30", "2026-10-01"), null);
+  /* Regression: the board grid showed "null" in every cell when paged back to
+     September, because the default ref was today's month rather than the
+     date's own. A day number with no ref is always just the number. */
+  check("monthDayNum with no ref is the day", monthDayNum("2026-09-30"), 30);
+  check("monthDayNum against itself", monthDayNum("2026-09-30", "2026-09-30"), 30);
   check("monthLength Oct", monthLength("2026-10-05"), 31);
 
   /* ---- streaks: log[date][userId] ---- */

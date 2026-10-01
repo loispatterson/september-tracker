@@ -721,7 +721,7 @@ function renderBoard() {
       const fun = entryFor(funLog, ds, u.id);
       const hasPhoto = !!(photoLog[ds] && photoLog[ds][u.id]);
       return `<button class="cell ${cellClass(u.id, ds, today, since, month + "-01")}" data-action="cell" data-id="${u.id}" data-date="${ds}">
-        ${monthDayNum(ds)}${fun && fun.done
+        ${monthDayNum(ds, ds)}${fun && fun.done
           ? `<span class="fun-dot${hasPhoto ? " photo" : ""}"></span>` : ""}
       </button>`;
     }).join("");
