@@ -1,4 +1,5 @@
 import { sql, endpoint, sessionUser } from "./_lib/db.js";
+import { challengeFromEnv } from "./_lib/challenge.js";
 
 /* On the public demo every visitor is issued their own throwaway account, so
    without this the board would grow a row per person who ever clicked the
@@ -26,21 +27,27 @@ export default endpoint(async (req, res) => {
     ? asked
     : new Date().toISOString().slice(0, 7);
 
-  const [users, entries, funIdeas, myActivities] = await Promise.all([
+  const [users, entries, funIdeas, myActivities, raised] = await Promise.all([
     /* Name and avatar only. Age band, goals, fitness level and notes are
        private to their owner and come back from /api/me instead — the board
        is shared with everyone who has the passcode. */
     /* last_active drives hiding people who have drifted away. It looks across
        every month, not just the one on screen, because on the 1st nobody has
        logged anything yet and everyone would read as stale. */
-    sql`SELECT u.id, u.name, u.emoji,
+    /* EVERY user, viewers included, each carrying its role.
+       render() decides whether someone is signed in by looking themselves up
+       in this list. Filter viewers out here and every sponsor is bounced to
+       the onboarding screen for ever, with a symptom that points nowhere near
+       the cause. The client filters per view instead. */
+    sql`SELECT u.id, u.name, u.emoji, u.role, u.fundraising_url,
                to_char(u.created_at, 'YYYY-MM-DD') AS joined,
                u.pin_hash IS NOT NULL AS has_pin,
                greatest(coalesce(max(e.date), ''),
                         to_char(u.created_at, 'YYYY-MM-DD')) AS last_active
           FROM users u
           LEFT JOIN entries e ON e.user_id = u.id AND e.done
-      GROUP BY u.id, u.name, u.emoji, u.created_at, u.pin_hash
+      GROUP BY u.id, u.name, u.emoji, u.role, u.fundraising_url,
+               u.created_at, u.pin_hash
       ORDER BY u.created_at`,
     /* p.id only — NEVER p.data. This response is refetched every 60 seconds on
        phones; photo bytes belong in /api/photo, fetched once and cached. */
@@ -85,6 +92,14 @@ export default endpoint(async (req, res) => {
           ORDER BY n DESC, last DESC
              LIMIT 12`
       : Promise.resolve([]),
+    /* Latest recorded total per person, for the "together we've raised" line
+       and the sponsor buttons. DISTINCT ON takes one row each, the most recent.
+       Only asked for where the challenge actually fundraises. */
+    challengeFromEnv().fundraising
+      ? sql`SELECT DISTINCT ON (user_id) user_id, amount, currency, date
+              FROM fundraising_snapshots
+          ORDER BY user_id, date DESC`
+      : Promise.resolve([]),
   ]);
   /* Lets an open tab notice it is running superseded code. */
   /* CLI deploys have no commit SHA, so fall back to the per-deployment id. */
@@ -96,6 +111,25 @@ export default endpoint(async (req, res) => {
   const [shownUsers, shownEntries] = demo
     ? hideOtherGuests(viewer, users, entries)
     : [users, entries];
+    const cfg = challengeFromEnv();
+
+  /* One row per person per day they opened the app. "Days posted" says whether
+     someone kept the habit; this says whether they kept opening the thing,
+     which is the separate question and the one that says whether the app is
+     doing any work at all.
+
+     ON CONFLICT DO NOTHING, so the 60-second poll costs one insert a day
+     rather than 1440. Not awaited: a failed analytics write must never fail
+     the board, and the board is what people actually came for. */
+  if (viewer) {
+    sql`INSERT INTO user_days (user_id, date)
+        VALUES (${viewer}, to_char(now(), 'YYYY-MM-DD'))
+        ON CONFLICT DO NOTHING`.catch(() => {});
+  }
+
   res.status(200).json({ users: shownUsers, entries: shownEntries, funIdeas,
-                        myActivities, month, build, demo });
+                        myActivities, raised, month, build, demo,
+                        challenge: cfg.id,
+                        vapidPublicKey: process.env.VAPID_PUBLIC_KEY || null,
+                        open: !process.env.BOARD_PASSCODE });
 });

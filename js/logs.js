@@ -1,3 +1,26 @@
+/* Splitting the board by role.
+
+   The board deliberately returns everyone, viewers included, because render()
+   decides whether you are signed in by finding yourself in that list — filter
+   viewers out server-side and every sponsor is bounced to onboarding for ever.
+   So the filtering happens here, at each place that actually wants one group:
+   the grid, the Today strip and the gallery want participants; the sponsor
+   count wants viewers.
+
+   Anything without a role is a participant, which keeps every row written
+   before viewers existed correct. */
+export function participants(users) {
+  return (users || []).filter(u => (u.role || "participant") !== "viewer");
+}
+
+export function viewers(users) {
+  return (users || []).filter(u => u.role === "viewer");
+}
+
+export function isViewer(user) {
+  return !!user && user.role === "viewer";
+}
+
 /* Who still counts as part of the board.
 
    Someone who logged twice in the first week and never came back makes the

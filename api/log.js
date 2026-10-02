@@ -2,6 +2,7 @@ import { sql, endpoint, bad } from "./_lib/db.js";
 import { validEntryDate, ENTRY_DATE_ERROR } from "./_lib/month.js";
 import { validFeeling } from "./_lib/profile.js";
 import { reconcileActivity } from "./_lib/activity.js";
+import { challengeFromEnv } from "./_lib/challenge.js";
 
 /* POST { date, kind, done, activity?, note? } → upsert (last write wins).
    done:null deletes the entry (un-log / backfill clear).
@@ -22,6 +23,14 @@ export default endpoint(async (req, res, userId) => {
   const feeling = validFeeling(rawFeeling) ? rawFeeling : null;
   if (!validEntryDate(date)) return bad(res, ENTRY_DATE_ERROR);
   if (kind !== "exercise" && kind !== "fun") return bad(res, "bad kind");
+
+  /* Viewers watch, comment and sponsor. They do not log days, and the board
+     counts days posted, so this has to be refused server-side rather than
+     merely hidden in the UI. */
+  const [who] = await sql`SELECT role FROM users WHERE id = ${userId}`;
+  if (who && who.role === "viewer") {
+    return res.status(403).json({ error: "viewers don't log days" });
+  }
 
   /* Reconcile the name against what this person has already used, so a second
      "body pump" lands on their existing "Body Pump" instead of becoming a

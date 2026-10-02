@@ -7,6 +7,7 @@ const { validatePhoto, newPhotoId, b64Bytes, stripDataUrl, validPhotoDate, MAX_B
 const { validEntryDate } = await import("../api/_lib/month.js");
 const { challengeFromEnv } = await import("../api/_lib/challenge.js");
 const { whichDb } = await import("../api/_lib/which-db.mjs");
+const { cleanFundraisingUrl, parseAmount } = await import("../api/_lib/fundraising.js");
 const { readdirSync } = await import("node:fs");
 
 let { pass, fail } = runSelfTests();
@@ -111,6 +112,34 @@ const { galleryItems } = await import("../js/imageutil.js");
     order([{ name: "Bo", total: 0, cur: 0, best: 0 },
            { name: "Ada", total: 0, cur: 0, best: 0 }]), ["Ada", "Bo"]);
 }
+
+/* ---- fundraising links ----
+   The app never touches money, so the only job is making sure a link points
+   somewhere a sponsor should actually be sent. */
+check("a Movember page", cleanFundraisingUrl("https://uk.movember.com/mospace/14512345"),
+  "https://uk.movember.com/mospace/14512345");
+check("https is assumed when pasted bare", cleanFundraisingUrl("uk.movember.com/mospace/123"),
+  "https://uk.movember.com/mospace/123");
+check("tracking is stripped", cleanFundraisingUrl("https://movember.com/m/abc?utm_source=whatsapp"),
+  "https://movember.com/m/abc");
+check("http is upgraded", cleanFundraisingUrl("http://mobro.co/lois"), "https://mobro.co/lois");
+check("JustGiving is allowed too",
+  cleanFundraisingUrl("https://www.justgiving.com/fundraising/lois"),
+  "https://www.justgiving.com/fundraising/lois");
+check("somewhere else is refused", cleanFundraisingUrl("https://evil.com/phish"), "");
+/* the one that matters: a lookalike host must not pass */
+check("a lookalike host is refused", cleanFundraisingUrl("https://movember.com.evil.com/x"), "");
+check("nonsense is refused", cleanFundraisingUrl("not a url"), "");
+check("nothing is refused", cleanFundraisingUrl(""), "");
+
+check("a plain amount", parseAmount("412.50"), 412.5);
+check("a currency symbol", parseAmount("£412.50"), 412.5);
+check("thousands separators", parseAmount("1,240"), 1240);
+check("zero is a real total", parseAmount("0"), 0);
+check("negative is refused", parseAmount("-5"), null);
+check("words are refused", parseAmount("abc"), null);
+check("exponent notation is refused", parseAmount("1e9"), null);
+check("three decimals are refused", parseAmount("12.345"), null);
 
 /* ---- telling the three databases apart ----
    Two of them are called neondb and the demo shares an endpoint with the live

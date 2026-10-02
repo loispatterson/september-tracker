@@ -36,6 +36,13 @@ async function get(req, res) {
 
 /* Writes need a session; the reader above only needs the board passcode. */
 const post = endpoint(async (req, res, userId) => {
+
+  /* Same rule as api/log.js: a photo IS the day on the Cairn deployment, so
+     letting a viewer upload one would put them on the grid. */
+  const [who] = await sql`SELECT role FROM users WHERE id = ${userId}`;
+  if (who && who.role === "viewer") {
+    return res.status(403).json({ error: "viewers don't post photos" });
+  }
   const { date, mime, w, h, activity } = req.body || {};
   const b64 = stripDataUrl((req.body || {}).b64);
   const problem = validatePhoto({ date, mime, b64 });

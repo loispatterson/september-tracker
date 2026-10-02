@@ -12,7 +12,7 @@ import { pickWorkouts, hashStr, needsEasyDay } from "./suggestions.js";
 import { expandAgeBand } from "./profile.js";
 import { WORKOUTS } from "./data/workouts.js";
 import { funPromptFor, funPool } from "./fun.js";
-import { activeUsers, orderedActivities, DEFAULT_ACTIVITIES, buildLogs, minutesOf, prettyMinutes, describeEntry, totalMinutes, feelingLabel } from "./logs.js";
+import { participants, viewers, isViewer, activeUsers, orderedActivities, DEFAULT_ACTIVITIES, buildLogs, minutesOf, prettyMinutes, describeEntry, totalMinutes, feelingLabel } from "./logs.js";
 import { readExifOrientation, orientationTransform, fitDimensions, galleryItems } from "./imageutil.js";
 
 export function runSelfTests() {
@@ -268,6 +268,22 @@ export function runSelfTests() {
   check("the most-used spelling wins, whatever the order",
     foldActivityCounts([{ activity: "body pump", n: 1 }, { activity: "Body Pump", n: 3 }])[0].activity,
     "Body Pump");
+
+  /* ---- participants and viewers ---- */
+  {
+    const us = [
+      { id: "a" },                        /* written before roles existed */
+      { id: "b", role: "participant" },
+      { id: "c", role: "viewer" },
+    ];
+    check("no role means participant", participants(us).map(u => u.id), ["a", "b"]);
+    check("viewers are picked out", viewers(us).map(u => u.id), ["c"]);
+    check("isViewer on a legacy row", isViewer({ id: "a" }), false);
+    check("isViewer on a viewer", isViewer({ id: "c", role: "viewer" }), true);
+    check("participants and viewers partition the board",
+      participants(us).length + viewers(us).length, us.length);
+    check("empty board is safe", [participants(null), viewers(undefined)], [[], []]);
+  }
 
   /* ---- hiding people who drifted away ---- */
   {
