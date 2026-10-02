@@ -4,6 +4,7 @@
 import { FUN_PROMPTS } from "./data/fun-prompts.js";
 import { reconcileActivity, foldActivityCounts, cleanActivity }
   from "../api/_lib/activity.js";
+import { CHALLENGES, challengeConfig, shouldShowPromo } from "./challenge.js";
 import { addDays, prettyDate, monthDates, monthDayNum, monthStart, monthEnd,
          monthLength, monthName, monthOf } from "./dates.js";
 import { currentStreak, bestStreak, totalHits, dayResult, HIT, MISS, PENDING, NEUTRAL } from "./streaks.js";
@@ -225,6 +226,33 @@ export function runSelfTests() {
     currentStreak(U, sepLog, "2026-10-01"), 0);
   check("last month's days don't count toward this month's total",
     totalHits(U, sepLog, "2026-10-05"), 0);
+
+  /* ---- the challenge config ---- */
+  /* The fallback direction is the point: a typo in an env var must never turn
+     the friends' board into something else. */
+  check("no challenge means the original", challengeConfig(undefined).id, "wellbeing");
+  check("empty string falls back", challengeConfig("").id, "wellbeing");
+  check("a typo falls back", challengeConfig("moveber").id, "wellbeing");
+  check("movember selects movember", challengeConfig("movember").id, "movember");
+  check("case and spaces don't matter", challengeConfig(" MoVeMbEr ").id, "movember");
+  check("movember is Cairn", challengeConfig("movember").appName, "Cairn");
+  /* Both challenges share entries.kind 'fun' on purpose — see schema.sql. */
+  check("both share the day kind",
+    [CHALLENGES.wellbeing.dayKind, CHALLENGES.movember.dayKind], ["fun", "fun"]);
+  check("movember has no exercise card", CHALLENGES.movember.hasExercise, false);
+  check("movember's photo is the log", CHALLENGES.movember.photoIsTheLog, true);
+  check("only movember has viewers",
+    [CHALLENGES.wellbeing.roles.includes("viewer"),
+     CHALLENGES.movember.roles.includes("viewer")], [false, true]);
+
+  /* The promo shows once on each listed day and then never again. */
+  const _mo = CHALLENGES.movember;
+  check("promo on day 7 when unseen", shouldShowPromo(7, 0, _mo), true);
+  check("promo not twice on the same day", shouldShowPromo(7, 1, _mo), false);
+  check("promo on day 21 after one", shouldShowPromo(21, 1, _mo), true);
+  check("promo stops after both", shouldShowPromo(21, 2, _mo), false);
+  check("promo not on other days", shouldShowPromo(12, 0, _mo), false);
+  check("wellbeing has no promo", shouldShowPromo(7, 0, CHALLENGES.wellbeing), false);
 
   /* ---- tidying activity names ---- */
   check("whitespace collapsed", cleanActivity("  Body   Pump "), "Body Pump");

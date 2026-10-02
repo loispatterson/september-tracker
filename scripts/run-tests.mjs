@@ -5,6 +5,8 @@ const { hashPin, verifyPin, validPin, newToken } = await import("../api/_lib/aut
 const { validatePhoto, newPhotoId, b64Bytes, stripDataUrl, validPhotoDate, MAX_B64 } =
   await import("../api/_lib/photos.js");
 const { validEntryDate } = await import("../api/_lib/month.js");
+const { challengeFromEnv } = await import("../api/_lib/challenge.js");
+const { readdirSync } = await import("node:fs");
 
 let { pass, fail } = runSelfTests();
 const check = (label, got, want) => {
@@ -108,6 +110,23 @@ const { galleryItems } = await import("../js/imageutil.js");
     order([{ name: "Bo", total: 0, cur: 0, best: 0 },
            { name: "Ada", total: 0, cur: 0, best: 0 }]), ["Ada", "Bo"]);
 }
+
+/* ---- the Vercel Hobby function cap ----
+   Every .js file directly in api/ becomes a serverless function, and the free
+   plan allows twelve. We are at exactly twelve. A thirteenth makes the deploy
+   fail, and it fails quietly: the push errors and the site carries on serving
+   the old version. This turns that into a red test instead of a mystery.
+   Files starting with _ are excluded by Vercel, which is why api/_lib is free. */
+{
+  const fns = readdirSync(new URL("../api/", import.meta.url))
+    .filter(f => f.endsWith(".js") && !f.startsWith("_"));
+  check(`api/ has ${fns.length} functions, Vercel Hobby allows 12`, fns.length <= 12, true);
+}
+
+/* The server reads the challenge from the environment; the absence of the
+   variable has to mean the friends' board, untouched. */
+check("no CHALLENGE env means wellbeing", challengeFromEnv({}).id, "wellbeing");
+check("CHALLENGE=movember selects it", challengeFromEnv({ CHALLENGE: "movember" }).id, "movember");
 
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

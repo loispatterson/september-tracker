@@ -108,3 +108,81 @@ CREATE TABLE IF NOT EXISTS entry_comments (
 -- for one day's comments in order.
 CREATE INDEX IF NOT EXISTS entry_comments_target
   ON entry_comments (owner_id, date, kind, id);
+
+-- ===========================================================================
+-- Cairn: the charity-challenge deployment (CHALLENGE=movember)
+--
+-- On that deployment, kind 'fun' IS the daily moustache photo. The shape is
+-- identical -- one row per person per date, with a photo, likes and comments --
+-- so the name was left alone rather than threading a second kind through every
+-- query and every CHECK constraint three weeks before a fixed launch date.
+-- js/challenge.js holds it as cfg.dayKind, so the rename, if it is ever worth
+-- doing, is that one value plus, on the Movember database only, where every
+-- fun row is a moustache row:
+--     UPDATE entries SET kind = 'mo' WHERE kind = 'fun'
+-- ===========================================================================
+
+-- Who this account is for. 'participant' grows a moustache and logs days;
+-- 'viewer' is a sponsor or friend who watches, comments and chips in, and
+-- never logs anything. Default 'participant' so every account that existed
+-- before viewers did keeps working untouched.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS role text NOT NULL DEFAULT 'participant';
+
+-- A participant's own fundraising page. The app never touches money: this is
+-- a link out, and the only thing stored is the address.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS fundraising_url text;
+
+-- Daily reminders. Opt-out rather than opt-in, because agreeing to
+-- notifications in the browser is already the explicit opt-in.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS notify boolean NOT NULL DEFAULT true;
+
+-- Which participant a viewer arrived to cheer on, when they came from a
+-- shared link. Null for anyone who just turned up.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS cheering text;
+
+-- One row per person per day they opened the app.
+--
+-- This is the retention measurement. "Days posted" says whether someone kept
+-- up the habit; this says whether they kept opening the thing, which is the
+-- separate question and the one that says whether the app is doing any work.
+-- Written from /api/board, once per person per day, ON CONFLICT DO NOTHING, so
+-- the 60-second poll costs one insert a day rather than 1440.
+CREATE TABLE IF NOT EXISTS user_days (
+  user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  date    text NOT NULL,
+  PRIMARY KEY (user_id, date)
+);
+CREATE INDEX IF NOT EXISTS user_days_date ON user_days (date);
+
+-- What a participant's public fundraising page said, and when.
+--
+-- Kept as a series rather than as a column on users, because the question is
+-- not "how much did they raise" but "did donations keep arriving through the
+-- month, or only in the first 48 hours". A single total cannot answer that.
+-- source is 'self' when they typed it in, 'recorded' when it was read off
+-- their page by scripts/record-totals.mjs.
+CREATE TABLE IF NOT EXISTS fundraising_snapshots (
+  user_id    text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  date       text NOT NULL,
+  amount     numeric(10,2) NOT NULL,
+  currency   text NOT NULL DEFAULT 'GBP',
+  source     text NOT NULL DEFAULT 'recorded',
+  created_at timestamptz DEFAULT now(),
+  PRIMARY KEY (user_id, date)
+);
+
+-- One row per browser that has agreed to notifications. The endpoint is the
+-- primary key because that is what the push service issues and what identifies
+-- the subscription; the same person on a phone and a laptop is two rows.
+-- failures counts consecutive rejections so a dead subscription gets pruned
+-- rather than retried every evening for a month.
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  endpoint   text PRIMARY KEY,
+  user_id    text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  p256dh     text NOT NULL,
+  auth       text NOT NULL,
+  created_at timestamptz DEFAULT now(),
+  last_ok_at timestamptz,
+  failures   int NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS push_subscriptions_user ON push_subscriptions (user_id);
