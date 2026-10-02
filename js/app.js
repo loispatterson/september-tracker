@@ -339,7 +339,7 @@ function renderOnboard() {
     const u = ui.claiming;
     const fresh = u.has_pin === false;   /* joined before PINs existed */
     return `<div class="onboard">
-      <h2>${avatarHtml(u.emoji, 28)} ${esc(u.name)}</h2>
+      <h2>${avatarHtml(u.emoji, 36)} ${esc(u.name)}</h2>
       <p class="muted small">${fresh
         ? "Choose a 4-digit PIN now — you'll use it to log in on any other device."
         : "Enter your 4-digit PIN to log in on this device."}</p>
@@ -377,7 +377,7 @@ function renderOnboard() {
             dozens and is nobody else's business; a viewer types their name
             instead, below. */
         participants(board.users).map(u =>
-        `<button class="btn" data-action="claim" data-id="${u.id}">${avatarHtml(u.emoji)} ${esc(u.name)}</button>`).join("")}
+        `<button class="btn" data-action="claim" data-id="${u.id}">${avatarHtml(u.emoji, 28)} ${esc(u.name)}</button>`).join("")}
     </div>
     <button class="btn primary big" data-action="onboard-step"
             data-val="${cfg.roles.length > 1 ? "role" : "new"}">I'm new — set me up</button>
@@ -430,7 +430,7 @@ function avatarPicker(current, action) {
     return `<div class="chips avatars">${choices.map(e =>
       `<button class="chip ${current === e ? "on" : ""}" data-action="${action}" data-key="emoji"
                data-val="${esc(e)}" title="${esc(avatarName(e))}"
-               aria-label="${esc(avatarName(e))}">${avatarHtml(e, 30)}</button>`).join("")}</div>`;
+               aria-label="${esc(avatarName(e))}">${avatarHtml(e, 46)}</button>`).join("")}</div>`;
   }
   const { style } = splitAvatar(current);
   const keep = c => withColour(c, splitAvatar(current).colour);
@@ -439,7 +439,7 @@ function avatarPicker(current, action) {
       return `<button class="chip ${splitAvatar(val).style === style ? "on" : ""}"
                data-action="${action}" data-key="emoji" data-val="${esc(val)}"
                title="${esc(avatarName(val))}" aria-label="${esc(avatarName(val))}"
-               >${avatarHtml(val, 30)}</button>`;
+               >${avatarHtml(val, 46)}</button>`;
     }).join("")}</div>
     <div class="chips swatches">${COLOURS.map(col => {
       const val = withColour(current, col.id);
@@ -579,7 +579,7 @@ function renderToday() {
     const e = entryFor(exLog, today, u.id), f = entryFor(funLog, today, u.id);
     const posted = f && f.done && f.photo_id;
     return `<div class="friend-row">
-      <span class="av">${avatarHtml(u.emoji)}</span>
+      <span class="av">${avatarHtml(u.emoji, 28)}</span>
       <span class="name">${esc(u.name)}${u.id === me.id ? " <span class='muted small'>(you)</span>" : ""}</span>
       ${cfg.hasExercise && e && e.done
         ? `<span class="small muted">${esc(prettyMinutes(minutesOf(e)))}</span>` : ""}
@@ -752,7 +752,7 @@ function renderGallery() {
     ${photographers.length > 1 ? `<div class="chips">
       <button class="chip ${filter ? "" : "on"}" data-action="gallery-filter" data-id="">Everyone</button>
       ${photographers.map(u => `<button class="chip ${filter === u.id ? "on" : ""}"
-        data-action="gallery-filter" data-id="${u.id}">${avatarHtml(u.emoji)} ${esc(u.name)}</button>`).join("")}
+        data-action="gallery-filter" data-id="${u.id}">${avatarHtml(u.emoji, 28)} ${esc(u.name)}</button>`).join("")}
     </div>` : ""}
   </div>`;
 
@@ -934,7 +934,7 @@ function renderBoard() {
     const medal = tot > 0 && ranked.length > 1 ? ["🥇", "🥈", "🥉"][i] || "" : "";
     return `<div class="card board-user${i === 0 && medal ? " leader" : ""}">
       <div class="board-head">
-        <span class="av">${avatarHtml(u.emoji)}</span>
+        <span class="av">${avatarHtml(u.emoji, 28)}</span>
         <b>${esc(u.name)}</b>
         ${medal ? `<span class="medal" title="${tot} day${tot === 1 ? "" : "s"} logged">${medal}</span>` : ""}
       </div>

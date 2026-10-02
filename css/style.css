@@ -527,14 +527,14 @@ nav.tabs button.on { color: var(--accent); font-weight: 600; }
    and a square chip would crop it to nothing. */
 .chips.avatars { gap: 6px; }
 .chips.avatars .chip {
-  padding: 10px 12px; min-width: 56px;
+  padding: 6px 4px; min-width: 54px;
   display: inline-flex; align-items: center; justify-content: center;
 }
 /* The row avatar sits in a fixed column so names line up down the list
    whether someone picked a Pencil or a Hungarian. */
 .friend-row .av, .board-head .av {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 28px; flex: none;
+  width: 32px; flex: none;
 }
 /* Colour swatches: a round dab of the colour, not a moustache, so the two rows
    read as "which shape" and "what colour" rather than one long list. */
