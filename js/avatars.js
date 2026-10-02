@@ -92,36 +92,97 @@ export const MOUSTACHES = {
 
 export const MOUSTACHE_KEYS = Object.keys(MOUSTACHES);
 
+/* Colours.
+
+   Hair colours rather than brand colours, because a moustache that is teal is
+   a joke and a moustache that is auburn is a person. The bold three at the end
+   are there for the people who want to be a joke.
+
+   Every one has to read on both the light and the dark theme, so true black
+   and true white are out: the darkest here is a deep chestnut and the lightest
+   a warm silver. */
+export const COLOURS = [
+  { id: "chestnut", name: "Chestnut", hex: "#6b4423" },
+  { id: "auburn",   name: "Auburn",   hex: "#8c3b1b" },
+  { id: "ginger",   name: "Ginger",   hex: "#c25e1a" },
+  { id: "sandy",    name: "Sandy",    hex: "#b08445" },
+  { id: "blonde",   name: "Blonde",   hex: "#c8a24a" },
+  { id: "ash",      name: "Ash",      hex: "#8a8378" },
+  { id: "silver",   name: "Silver",   hex: "#aab0b4" },
+  { id: "jet",      name: "Jet",      hex: "#4a4440" },
+  { id: "teal",     name: "Teal",     hex: "#2a7f78" },
+  { id: "plum",     name: "Plum",     hex: "#7d3a63" },
+  { id: "moss",     name: "Moss",     hex: "#5b7a35" },
+];
+
+const BY_COLOUR = new Map(COLOURS.map(c => [c.id, c]));
+
+/* An avatar is "mo:<style>" or "mo:<style>.<colour>". The colour is optional
+   so every row written before colours existed still works: without one, the
+   style picks a colour from the palette by position, which at least makes the
+   picker look like seventeen different things rather than seventeen identical
+   cream shapes. */
+export function splitAvatar(avatar) {
+  const body = String(avatar || "").slice(3);
+  const dot = body.indexOf(".");
+  const style = dot === -1 ? body : body.slice(0, dot);
+  const colour = dot === -1 ? "" : body.slice(dot + 1);
+  return { style, colour };
+}
+
+export function colourFor(avatar) {
+  const { style, colour } = splitAvatar(avatar);
+  if (BY_COLOUR.has(colour)) return BY_COLOUR.get(colour).hex;
+  const i = MOUSTACHE_KEYS.indexOf(style);
+  return COLOURS[(i < 0 ? 0 : i) % COLOURS.length].hex;
+}
+
+export function colourName(avatar) {
+  const { colour } = splitAvatar(avatar);
+  return BY_COLOUR.has(colour) ? BY_COLOUR.get(colour).name : "";
+}
+
+export function withColour(avatar, colourId) {
+  const { style } = splitAvatar(avatar);
+  return BY_COLOUR.has(colourId) ? `mo:${style}.${colourId}` : `mo:${style}`;
+}
+
 export function isMoustache(avatar) {
   return typeof avatar === "string" && avatar.startsWith("mo:");
 }
 
 export function moustacheKey(avatar) {
-  const k = String(avatar || "").slice(3);
-  return MOUSTACHES[k] ? k : null;
+  if (!isMoustache(avatar)) return null;
+  const { style } = splitAvatar(avatar);
+  return MOUSTACHES[style] ? style : null;
 }
 
 /* A readable name for the avatar, used in alt text and titles. */
 export function avatarName(avatar) {
   const k = moustacheKey(avatar);
-  return k ? MOUSTACHES[k].name : String(avatar || "");
+  if (!k) return String(avatar || "");
+  const c = colourName(avatar);
+  return c ? `${c} ${MOUSTACHES[k].name}` : MOUSTACHES[k].name;
 }
 
 /* Inline SVG rather than an <img>: no request, scales cleanly, and takes its
    colour from the surrounding text so it works in both themes without a
    second asset. */
-export function moustacheSvg(key, size = 22) {
+export function moustacheSvg(key, size = 22, colour = "") {
   const m = MOUSTACHES[key];
   if (!m) return "";
+  /* A real colour rather than currentColor: the whole point is telling people
+     apart on a board, and inheriting the text colour makes everyone identical. */
+  const fill = colour || colourFor("mo:" + key);
   return `<svg class="mo-svg" viewBox="0 0 48 24" width="${size}" height="${Math.round(size / 2)}"
-    aria-hidden="true" focusable="false"><path d="${m.d}" fill="currentColor"/></svg>`;
+    aria-hidden="true" focusable="false"><path d="${m.d}" fill="${fill}"/></svg>`;
 }
 
 /* The one call every render site makes. Returns HTML.
    `avatar` is whatever is stored on the user: an emoji, or "mo:handlebar". */
 export function avatarHtml(avatar, size = 22) {
   const k = moustacheKey(avatar);
-  if (k) return moustacheSvg(k, size);
+  if (k) return moustacheSvg(k, size, colourFor(avatar));
   /* A "mo:" avatar whose style we no longer have — a renamed key, or a row
      written by a newer version — draws the starter moustache rather than the
      literal string "mo:whatever" appearing in the middle of the board. */

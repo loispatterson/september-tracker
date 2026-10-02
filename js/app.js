@@ -7,7 +7,8 @@ import { getSuggestions, getAiSuggestions, aiAvailable } from "./suggestions.js"
 import { funPromptFor } from "./fun.js";
 import { AGE_BANDS, GOALS, FITNESS, FEELINGS, isLegacyBand } from "./profile.js";
 import { challengeConfig } from "./challenge.js";
-import { avatarHtml, avatarName, avatarChoices, defaultAvatar } from "./avatars.js";
+import { avatarHtml, avatarName, avatarChoices, defaultAvatar,
+         COLOURS, colourFor, withColour, splitAvatar } from "./avatars.js";
 import { participants, viewers, isViewer, activeUsers, orderedActivities, buildLogs,
          minutesOf, prettyMinutes, describeEntry, totalMinutes,
          feelingLabel, DEFAULT_MINUTES } from "./logs.js";
@@ -287,10 +288,7 @@ function renderOnboard() {
       </div>
       <div class="field">
         <label>Pick an avatar</label>
-        <div class="chips avatars">${avatarChoices(cfg).map(e =>
-          `<button class="chip ${d.emoji === e ? "on" : ""}" data-action="draft" data-key="emoji"
-                   data-val="${esc(e)}" title="${esc(avatarName(e))}"
-                   aria-label="${esc(avatarName(e))}">${avatarHtml(e, 30)}</button>`).join("")}</div>
+        ${avatarPicker(d.emoji, "draft")}
       </div>
       ${/* Age, fitness and goals exist only to tune workout suggestions.
             Cairn has none, so asking would be three screens of questions that
@@ -422,6 +420,34 @@ function renderSponsorCard() {
         <button class="btn ghost small" data-action="copy-share">Copy my link</button>
       </div>
     </div>`;
+}
+
+/* Style and colour are picked separately: seventeen styles times eleven
+   colours is 187 chips, which is a wall. Two short rows instead. */
+function avatarPicker(current, action) {
+  const choices = avatarChoices(cfg);
+  if (!cfg.photoIsTheLog) {
+    return `<div class="chips avatars">${choices.map(e =>
+      `<button class="chip ${current === e ? "on" : ""}" data-action="${action}" data-key="emoji"
+               data-val="${esc(e)}" title="${esc(avatarName(e))}"
+               aria-label="${esc(avatarName(e))}">${avatarHtml(e, 30)}</button>`).join("")}</div>`;
+  }
+  const { style } = splitAvatar(current);
+  const keep = c => withColour(c, splitAvatar(current).colour);
+  return `<div class="chips avatars">${choices.map(c => {
+      const val = keep(c);
+      return `<button class="chip ${splitAvatar(val).style === style ? "on" : ""}"
+               data-action="${action}" data-key="emoji" data-val="${esc(val)}"
+               title="${esc(avatarName(val))}" aria-label="${esc(avatarName(val))}"
+               >${avatarHtml(val, 30)}</button>`;
+    }).join("")}</div>
+    <div class="chips swatches">${COLOURS.map(col => {
+      const val = withColour(current, col.id);
+      return `<button class="chip swatch ${colourFor(current) === col.hex ? "on" : ""}"
+               data-action="${action}" data-key="emoji" data-val="${esc(val)}"
+               title="${esc(col.name)}" aria-label="${esc(col.name)}"
+               ><span style="background:${col.hex}"></span></button>`;
+    }).join("")}</div>`;
 }
 
 /* The name shown in the header, the tab and on a home screen. The wellbeing
@@ -989,10 +1015,7 @@ function renderProfile() {
       </div>
       <div class="field">
         <label>Avatar</label>
-        <div class="chips avatars">${avatarChoices(cfg).map(e =>
-          `<button class="chip ${p.emoji === e ? "on" : ""}" data-action="set-profile" data-key="emoji"
-                   data-val="${esc(e)}" title="${esc(avatarName(e))}"
-                   aria-label="${esc(avatarName(e))}">${avatarHtml(e, 30)}</button>`).join("")}</div>
+        ${avatarPicker(p.emoji, "set-profile")}
       </div>
       <p class="small muted">Everything below is private to you. Other people
         only ever see your name and avatar.</p>

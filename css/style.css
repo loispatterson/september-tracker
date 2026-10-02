@@ -536,3 +536,12 @@ nav.tabs button.on { color: var(--accent); font-weight: 600; }
   display: inline-flex; align-items: center; justify-content: center;
   width: 28px; flex: none;
 }
+/* Colour swatches: a round dab of the colour, not a moustache, so the two rows
+   read as "which shape" and "what colour" rather than one long list. */
+.chips.swatches { gap: 7px; margin-top: 7px; }
+.chips.swatches .chip { padding: 5px; min-width: 0; border-radius: 50%; }
+.chips.swatches .chip span {
+  display: block; width: 22px; height: 22px; border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(127,127,127,.35);
+}
+.chips.swatches .chip.on { outline: 2px solid var(--accent); outline-offset: 1px; }

@@ -6,7 +6,8 @@ import { reconcileActivity, foldActivityCounts, cleanActivity }
   from "../api/_lib/activity.js";
 import { CHALLENGES, challengeConfig, shouldShowPromo } from "./challenge.js";
 import { avatarHtml, avatarName, avatarChoices, defaultAvatar, MOUSTACHE_KEYS,
-         MOUSTACHES, isMoustache } from "./avatars.js";
+         MOUSTACHES, isMoustache, COLOURS, colourFor, withColour,
+         splitAvatar } from "./avatars.js";
 import { addDays, prettyDate, monthDates, monthDayNum, monthStart, monthEnd,
          monthLength, monthName, monthOf } from "./dates.js";
 import { currentStreak, bestStreak, totalHits, dayResult, HIT, MISS, PENDING, NEUTRAL } from "./streaks.js";
@@ -290,6 +291,26 @@ export function runSelfTests() {
   check("cairn starts you clean-shaven", defaultAvatar({ photoIsTheLog: true }), "mo:babyface");
   check("every choice renders", avatarChoices({ photoIsTheLog: true })
     .every(a => avatarHtml(a).includes("<svg")), true);
+
+  /* ---- avatar colours ---- */
+  check("a style without a colour still gets one",
+    /^#[0-9a-f]{6}$/.test(colourFor("mo:handlebar")), true);
+  check("styles differ from each other by default",
+    colourFor("mo:handlebar") !== colourFor("mo:walrus"), true);
+  check("an explicit colour wins", colourFor("mo:handlebar.teal"), "#2a7f78");
+  check("withColour keeps the style",
+    splitAvatar(withColour("mo:walrus", "ginger")).style, "walrus");
+  check("withColour replaces an existing colour",
+    withColour("mo:walrus.teal", "ginger"), "mo:walrus.ginger");
+  check("an unknown colour is dropped, not stored",
+    withColour("mo:walrus", "chartreuse"), "mo:walrus");
+  check("the name carries the colour", avatarName("mo:handlebar.teal"), "Teal Handlebar");
+  /* rows written before colours existed must keep working untouched */
+  check("a bare style still draws", avatarHtml("mo:walrus").includes("<svg"), true);
+  check("a coloured style draws in that colour",
+    avatarHtml("mo:walrus.plum").includes("#7d3a63"), true);
+  check("no colour is pure black or white, so both themes work",
+    COLOURS.every(c => !/^#(000000|ffffff)$/i.test(c.hex)), true);
 
   /* ---- participants and viewers ---- */
   {
