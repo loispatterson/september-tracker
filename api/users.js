@@ -3,6 +3,7 @@ import { hashPin, newToken, validPin } from "./_lib/auth.js";
 import { validAgeBand, cleanGoals, cleanNote, FITNESS, GOALS } from "./_lib/profile.js";
 import { challengeFromEnv } from "./_lib/challenge.js";
 import { cleanFundraisingUrl } from "./_lib/fundraising.js";
+import { defaultAvatar } from "../js/avatars.js";
 
 /* POST { name, emoji, ageBand, goals[], fitness, note?, pin } → { id, token }
    PATCH { emoji?, ageBand?, goals?, fitness?, note? } → { ok }
@@ -44,7 +45,7 @@ export default endpoint(async (req, res) => {
     try {
       await sql`INSERT INTO users (id, name, emoji, age_band, goal, goals, fitness, note,
                                    pin_hash, role, fundraising_url, cheering)
-                VALUES (${id}, ${cleanName}, ${String(emoji || "💪").slice(0, 8)},
+                VALUES (${id}, ${cleanName}, ${String(emoji || defaultAvatar(cfg)).slice(0, 24)},
                         ${band}, ${goalList[0]}, ${goalList.join(",")}, ${fit},
                         ${isViewer ? null : cleanNote(note)}, ${hashPin(pin)},
                         ${role}, ${fundraisingUrl || null},

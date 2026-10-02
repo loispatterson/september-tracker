@@ -16,6 +16,7 @@ import { validEntryDate, ENTRY_DATE_ERROR } from "../api/_lib/month.js";
 import { reconcileActivity } from "../api/_lib/activity.js";
 import { challengeFromEnv } from "../api/_lib/challenge.js";
 import { cleanFundraisingUrl } from "../api/_lib/fundraising.js";
+import { defaultAvatar } from "../js/avatars.js";
 import { validAgeBand, cleanGoals, cleanNote, FITNESS, validFeeling } from "../api/_lib/profile.js";
 
 const ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..");
@@ -211,7 +212,7 @@ async function apiRoute(req, res, path, q) {
     const id = "u_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     const now = new Date();
     const joined = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-    d.users.push({ id, name: cleanName, emoji: String(emoji || "💪").slice(0, 8),
+    d.users.push({ id, name: cleanName, emoji: String(emoji || defaultAvatar(cfg)).slice(0, 24),
                    age_band: band, goal: goalList[0], goals: goalList.join(","),
                    fitness: fit, note: isViewer ? null : cleanNote(note), joined,
                    role, fundraising_url: fundraisingUrl || null,

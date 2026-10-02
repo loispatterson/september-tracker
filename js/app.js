@@ -7,6 +7,7 @@ import { getSuggestions, getAiSuggestions, aiAvailable } from "./suggestions.js"
 import { funPromptFor } from "./fun.js";
 import { AGE_BANDS, GOALS, FITNESS, FEELINGS, isLegacyBand } from "./profile.js";
 import { challengeConfig } from "./challenge.js";
+import { avatarHtml, avatarName, avatarChoices, defaultAvatar } from "./avatars.js";
 import { participants, viewers, isViewer, activeUsers, orderedActivities, buildLogs,
          minutesOf, prettyMinutes, describeEntry, totalMinutes,
          feelingLabel, DEFAULT_MINUTES } from "./logs.js";
@@ -15,7 +16,6 @@ import { prepareUpload, blobToBase64, hydratePhotos, forgetPhoto, cachedUrl } fr
 
 const ME_KEY = "septTracker.me";
 
-const EMOJIS = ["💪", "🏃", "🚴", "🧘", "🏊", "⚡", "🔥", "🌟", "🐝", "🦊", "🐙", "🦕"];
 
 /* ---------- state ---------- */
 let board = { users: [], entries: [], funIdeas: [] };
@@ -44,7 +44,9 @@ const ui = {
   demoBusy: false,
   onboardStep: "who",             /* who | new | pin */
   claiming: null,                 /* user being claimed, awaiting their PIN */
-  draft: { name: "", emoji: "💪", ageBand: "", goals: [], fitness: "", note: "", pin: "" },
+  /* emoji starts empty and is filled from the challenge on first render:
+     cfg is not known at module load, because the board has not answered yet. */
+  draft: { name: "", emoji: "", ageBand: "", goals: [], fitness: "", note: "", pin: "" },
   changingPin: false,
   showSuggestions: false,
   funSwap: 0,
@@ -276,6 +278,7 @@ function renderOnboard() {
 
   if (ui.onboardStep === "new") {
     const d = ui.draft;
+    if (!d.emoji) d.emoji = defaultAvatar(cfg);
     return `<div class="onboard">
       <h2>Set up your profile</h2>
       <div class="field">
@@ -284,9 +287,15 @@ function renderOnboard() {
       </div>
       <div class="field">
         <label>Pick an avatar</label>
-        <div class="chips">${EMOJIS.map(e =>
-          `<button class="chip ${d.emoji === e ? "on" : ""}" data-action="draft" data-key="emoji" data-val="${e}">${e}</button>`).join("")}</div>
+        <div class="chips avatars">${avatarChoices(cfg).map(e =>
+          `<button class="chip ${d.emoji === e ? "on" : ""}" data-action="draft" data-key="emoji"
+                   data-val="${esc(e)}" title="${esc(avatarName(e))}"
+                   aria-label="${esc(avatarName(e))}">${avatarHtml(e, 30)}</button>`).join("")}</div>
       </div>
+      ${/* Age, fitness and goals exist only to tune workout suggestions.
+            Cairn has none, so asking would be three screens of questions that
+            change nothing. */
+        cfg.hasExercise ? `
       <div class="field">
         <label>Age band <span class="muted">(tunes workout intensity)</span></label>
         <div class="chips">${AGE_BANDS.map(([v, l]) =>
@@ -307,13 +316,23 @@ function renderOnboard() {
         <input type="text" id="note-input" value="${esc(d.note || "")}"
                placeholder="e.g. dodgy knee, no gym, back after time off" autocomplete="off">
         <p class="small muted">Only you can see this. It's used to tailor your workout suggestions.</p>
-      </div>
+      </div>` : `
+      ${d.role === "viewer" ? "" : `
+      <div class="field">
+        <label>Your fundraising page <span class="muted">(you can add this later)</span></label>
+        <input type="text" id="fundraising-input" value="${esc(d.fundraisingUrl || "")}"
+               placeholder="uk.movember.com/mospace/..." autocomplete="off" inputmode="url">
+        <p class="small muted">Nobody can sponsor you without it. Movember or JustGiving.</p>
+      </div>`}
+      <p class="small muted">This board is public: anyone with the link sees your
+        name, your avatar and the photos you post. Only post what you're happy
+        for people to see.</p>`}
       <div class="field">
         <label>Choose a 4-digit PIN <span class="muted">(so only you can log as you)</span></label>
         <input type="text" id="pin-input" inputmode="numeric" maxlength="4"
                value="${esc(d.pin || "")}" placeholder="••••" autocomplete="off">
       </div>
-      <button class="btn primary big" data-action="create-user">Start ${monthName()}</button>
+      <button class="btn primary big" data-action="create-user">${cfg.hasExercise ? `Start ${monthName()}` : (ui.draft.role === "viewer" ? "Count me in" : "Start growing")}</button>
       <p><button class="btn ghost small" data-action="onboard-step" data-val="who">← back</button></p>
     </div>`;
   }
@@ -322,7 +341,7 @@ function renderOnboard() {
     const u = ui.claiming;
     const fresh = u.has_pin === false;   /* joined before PINs existed */
     return `<div class="onboard">
-      <h2>${u.emoji} ${esc(u.name)}</h2>
+      <h2>${avatarHtml(u.emoji, 28)} ${esc(u.name)}</h2>
       <p class="muted small">${fresh
         ? "Choose a 4-digit PIN now — you'll use it to log in on any other device."
         : "Enter your 4-digit PIN to log in on this device."}</p>
@@ -335,6 +354,23 @@ function renderOnboard() {
     </div>`;
   }
 
+  /* Cairn has two kinds of person, and they need different sign-ups. Asked
+     before the form rather than as a checkbox inside it, because the two
+     paths genuinely differ. */
+  if (ui.onboardStep === "role") {
+    return `<div class="onboard">
+      <h2>Which are you?</h2>
+      <button class="btn primary big" data-action="pick-role" data-val="participant">
+        ${cfg.dayEmoji} I'm growing one</button>
+      <p class="small muted">You'll post a photo a day and people can sponsor you.</p>
+      <button class="btn big" data-action="pick-role" data-val="viewer">
+        👀 I'm here to cheer someone on</button>
+      <p class="small muted">You'll see everyone's photos and can leave comments.
+        You won't post any yourself.</p>
+      <p><button class="btn ghost small" data-action="onboard-step" data-val="who">← back</button></p>
+    </div>`;
+  }
+
   return `<div class="onboard">
     <h2>Who are you?</h2>
     <p class="muted small">${esc(cfg.tagline)}${cfg.hasExercise ? `, every day of ${monthName()}.` : "."}</p>
@@ -343,9 +379,10 @@ function renderOnboard() {
             dozens and is nobody else's business; a viewer types their name
             instead, below. */
         participants(board.users).map(u =>
-        `<button class="btn" data-action="claim" data-id="${u.id}">${u.emoji} ${esc(u.name)}</button>`).join("")}
+        `<button class="btn" data-action="claim" data-id="${u.id}">${avatarHtml(u.emoji)} ${esc(u.name)}</button>`).join("")}
     </div>
-    <button class="btn primary big" data-action="onboard-step" data-val="new">I'm new — set me up</button>
+    <button class="btn primary big" data-action="onboard-step"
+            data-val="${cfg.roles.length > 1 ? "role" : "new"}">I'm new — set me up</button>
     ${viewers(board.users).length ? `<p class="small muted">
       Here to cheer someone on? <button class="linkish" data-action="onboard-step" data-val="who-viewer">Find your name</button></p>` : ""}
   </div>`;
@@ -516,7 +553,7 @@ function renderToday() {
     const e = entryFor(exLog, today, u.id), f = entryFor(funLog, today, u.id);
     const posted = f && f.done && f.photo_id;
     return `<div class="friend-row">
-      <span>${u.emoji}</span>
+      <span class="av">${avatarHtml(u.emoji)}</span>
       <span class="name">${esc(u.name)}${u.id === me.id ? " <span class='muted small'>(you)</span>" : ""}</span>
       ${cfg.hasExercise && e && e.done
         ? `<span class="small muted">${esc(prettyMinutes(minutesOf(e)))}</span>` : ""}
@@ -646,11 +683,21 @@ function likeButton(item, { big = false } = {}) {
 
 function renderGallery() {
   const all = galleryItems(board.entries, board.users);
-  const photographers = board.users.filter(u => all.some(i => i.userId === u.id));
+  const photographers = participants(board.users).filter(u => all.some(i => i.userId === u.id));
   /* If the filtered person has no photos left (removed, or un-logged), fall
      back to everyone rather than showing a confusing empty grid. */
   const filter = photographers.some(u => u.id === ui.galleryUser) ? ui.galleryUser : null;
-  const items = filter ? all.filter(i => i.userId === filter) : all;
+  let items = filter ? all.filter(i => i.userId === filter) : all;
+
+  /* The filmstrip.
+
+     galleryItems sorts newest first, which is right for a mixed feed. But one
+     person's month, read oldest to newest, is thirty days of the same face
+     changing — and that is the whole emotional point of Movember. So when a
+     single person is selected on a growth challenge, the order flips and the
+     grid becomes a strip. */
+  const strip = cfg.photoIsTheLog && !!filter;
+  if (strip) items = items.slice().sort((a, b) => a.date.localeCompare(b.date));
 
   /* Scored against the month on screen, like the board, so paging back to
      September shows September's streak rather than today's. */
@@ -661,16 +708,25 @@ function renderGallery() {
 
   /* Same pager as the Board, and the same `ui.month`, so paging back on one
      tab and switching to the other keeps you in the month you were looking at. */
+  const who = filter ? photographers.find(u => u.id === filter) : null;
   const header = monthNav() + `<div class="card">
-    <h2>📸 Photos</h2>
-    <p class="small">You: 📸 ${mine} in a row, ${myTotal} photo${myTotal === 1 ? "" : "s"}.
-      ${all.length} in all from ${photographers.length} ${photographers.length === 1 ? "person" : "people"}.</p>
-    <p class="small muted">A photo streak counts days in a row with a photo, so a fun day
-      without one breaks it.</p>
+    <h2>${cfg.photoIsTheLog ? `${cfg.dayEmoji} ${strip ? esc(who.name) + "'s month" : "Everyone"}` : "📸 Photos"}</h2>
+    ${cfg.photoIsTheLog
+      ? `<p class="small">${strip
+          ? `${items.length} day${items.length === 1 ? "" : "s"}, oldest first. ${
+              strip && who && who.fundraising_url
+                ? `<a class="sponsor-btn" href="${esc(who.fundraising_url)}" target="_blank"
+                     rel="noopener noreferrer">Sponsor ${esc(who.name)} ↗</a>` : ""}`
+          : `${all.length} photo${all.length === 1 ? "" : "s"} from ${photographers.length} ${
+              photographers.length === 1 ? "person" : "people"}. Pick someone to watch a month go by.`}</p>`
+      : `<p class="small">You: 📸 ${mine} in a row, ${myTotal} photo${myTotal === 1 ? "" : "s"}.
+          ${all.length} in all from ${photographers.length} ${photographers.length === 1 ? "person" : "people"}.</p>
+         <p class="small muted">A photo streak counts days in a row with a photo, so a fun day
+           without one breaks it.</p>`}
     ${photographers.length > 1 ? `<div class="chips">
       <button class="chip ${filter ? "" : "on"}" data-action="gallery-filter" data-id="">Everyone</button>
       ${photographers.map(u => `<button class="chip ${filter === u.id ? "on" : ""}"
-        data-action="gallery-filter" data-id="${u.id}">${u.emoji} ${esc(u.name)}</button>`).join("")}
+        data-action="gallery-filter" data-id="${u.id}">${avatarHtml(u.emoji)} ${esc(u.name)}</button>`).join("")}
     </div>` : ""}
   </div>`;
 
@@ -680,12 +736,12 @@ function renderGallery() {
       esc(monthName(ref))}${thisMonth ? " yet. Add one from Today." : "."}</p></div>`;
   }
 
-  return header + `<div class="gallery">${items.map(i => `
+  return header + `<div class="gallery${strip ? " strip" : ""}">${items.map(i => `
     <div class="gtile">
       <button class="gopen" data-action="photo-open" data-photo-id="${esc(i.photoId)}"
               data-id="${esc(i.userId)}" data-date="${i.date}">
         <img data-photo="${esc(i.photoId)}" alt="${esc(i.name)}, ${esc(prettyDate(i.date))}">
-        <span class="gcap">${i.emoji} ${monthDayNum(i.date, i.date)}</span>
+        <span class="gcap">${avatarHtml(i.emoji, 16)} ${monthDayNum(i.date, i.date)}</span>
         ${/* A thread is invisible until you open the photo, so nobody goes
               looking. The badge is the only cue that there is anything to
               read. */
@@ -734,7 +790,7 @@ function renderLightbox() {
   const open = !!(ui.thread && ui.thread.owner === lb.userId && ui.thread.date === lb.date);
   return `<div class="lightbox" data-action="photo-close">
     <img data-photo="${esc(lb.photoId)}" alt="">
-    <div class="cap">${lb.emoji} ${esc(lb.name)} · ${esc(prettyDate(lb.date))}${
+    <div class="cap">${avatarHtml(lb.emoji)} ${esc(lb.name)} · ${esc(prettyDate(lb.date))}${
       lb.activity ? " · " + esc(lb.activity) : ""}</div>
     <div class="lb-actions">
       ${likeButton(live, { big: true })}
@@ -852,7 +908,7 @@ function renderBoard() {
     const medal = tot > 0 && ranked.length > 1 ? ["🥇", "🥈", "🥉"][i] || "" : "";
     return `<div class="card board-user${i === 0 && medal ? " leader" : ""}">
       <div class="board-head">
-        <span>${u.emoji}</span>
+        <span class="av">${avatarHtml(u.emoji)}</span>
         <b>${esc(u.name)}</b>
         ${medal ? `<span class="medal" title="${tot} day${tot === 1 ? "" : "s"} logged">${medal}</span>` : ""}
       </div>
@@ -933,8 +989,10 @@ function renderProfile() {
       </div>
       <div class="field">
         <label>Avatar</label>
-        <div class="chips">${EMOJIS.map(e =>
-          `<button class="chip ${p.emoji === e ? "on" : ""}" data-action="set-profile" data-key="emoji" data-val="${e}">${e}</button>`).join("")}</div>
+        <div class="chips avatars">${avatarChoices(cfg).map(e =>
+          `<button class="chip ${p.emoji === e ? "on" : ""}" data-action="set-profile" data-key="emoji"
+                   data-val="${esc(e)}" title="${esc(avatarName(e))}"
+                   aria-label="${esc(avatarName(e))}">${avatarHtml(e, 30)}</button>`).join("")}</div>
       </div>
       <p class="small muted">Everything below is private to you. Other people
         only ever see your name and avatar.</p>
@@ -1523,15 +1581,27 @@ async function onClick(ev) {
     return;
   }
 
+  if (a === "pick-role") {
+    ui.draft.role = el.dataset.val;
+    ui.onboardStep = "new";
+    render();
+    return;
+  }
+
   if (a === "create-user") {
     const d = ui.draft;
-    d.name = (document.getElementById("name-input").value || "").trim();
-    d.pin = (document.getElementById("pin-input").value || "").trim();
-    d.note = (document.getElementById("note-input").value || "").trim();
+    const val = id => { const el = document.getElementById(id); return el ? (el.value || "").trim() : ""; };
+    d.name = val("name-input");
+    d.pin = val("pin-input");
+    if (cfg.hasExercise) d.note = val("note-input");
+    else d.fundraisingUrl = val("fundraising-input");
     if (!d.name) return toast("Add your name first");
-    if (!d.ageBand) return toast("Pick an age band");
-    if (!d.fitness) return toast("Pick your current fitness level");
-    if (!(d.goals || []).length) return toast("Pick at least one goal");
+    /* The fitness questions only exist where there are workouts to tune. */
+    if (cfg.hasExercise) {
+      if (!d.ageBand) return toast("Pick an age band");
+      if (!d.fitness) return toast("Pick your current fitness level");
+      if (!(d.goals || []).length) return toast("Pick at least one goal");
+    }
     if (!/^\d{4}$/.test(d.pin)) return toast("Choose a 4-digit PIN");
     try {
       const { id, token } = await api.createUser(d);

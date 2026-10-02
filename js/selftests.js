@@ -5,6 +5,8 @@ import { FUN_PROMPTS } from "./data/fun-prompts.js";
 import { reconcileActivity, foldActivityCounts, cleanActivity }
   from "../api/_lib/activity.js";
 import { CHALLENGES, challengeConfig, shouldShowPromo } from "./challenge.js";
+import { avatarHtml, avatarName, avatarChoices, defaultAvatar, MOUSTACHE_KEYS,
+         MOUSTACHES, isMoustache } from "./avatars.js";
 import { addDays, prettyDate, monthDates, monthDayNum, monthStart, monthEnd,
          monthLength, monthName, monthOf } from "./dates.js";
 import { currentStreak, bestStreak, totalHits, dayResult, HIT, MISS, PENDING, NEUTRAL } from "./streaks.js";
@@ -268,6 +270,26 @@ export function runSelfTests() {
   check("the most-used spelling wins, whatever the order",
     foldActivityCounts([{ activity: "body pump", n: 1 }, { activity: "Body Pump", n: 3 }])[0].activity,
     "Body Pump");
+
+  /* ---- avatars ---- */
+  check("every moustache has a name and a path",
+    MOUSTACHE_KEYS.every(k => MOUSTACHES[k].name && MOUSTACHES[k].d.startsWith("M")), true);
+  check("there are enough to choose from", MOUSTACHE_KEYS.length >= 12, true);
+  check("an emoji passes straight through",
+    avatarHtml("🦊").includes("🦊"), true);
+  check("a moustache draws an svg", avatarHtml("mo:handlebar").includes("<svg"), true);
+  /* the one that stops "mo:whatever" appearing as text on the board */
+  check("an unknown style still draws something",
+    avatarHtml("mo:nope").includes("<svg"), true);
+  check("isMoustache", [isMoustache("mo:walrus"), isMoustache("🦊")], [true, false]);
+  check("a style has a readable name", avatarName("mo:dali"), "Dalí");
+  check("cairn offers moustaches",
+    avatarChoices({ photoIsTheLog: true }).every(a => a.startsWith("mo:")), true);
+  check("wellbeing offers emoji",
+    avatarChoices({ photoIsTheLog: false }).some(a => a.startsWith("mo:")), false);
+  check("cairn starts you clean-shaven", defaultAvatar({ photoIsTheLog: true }), "mo:babyface");
+  check("every choice renders", avatarChoices({ photoIsTheLog: true })
+    .every(a => avatarHtml(a).includes("<svg")), true);
 
   /* ---- participants and viewers ---- */
   {

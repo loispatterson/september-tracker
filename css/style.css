@@ -503,3 +503,36 @@ nav.tabs button.on { color: var(--accent); font-weight: 600; }
    money is a bad idea and the figures are self-reported anyway. */
 .raised-total { font-size: 15px; margin: 4px 0 0; }
 .raised-total b { font-size: 18px; }
+
+/* ---- the filmstrip ----
+   One person's month, oldest first. Smaller tiles than the mixed gallery, so
+   a whole month is on screen at once and the change from day one to day thirty
+   is visible without scrolling — which is the entire point of it. */
+.gallery.strip {
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: 3px;
+}
+.gallery.strip .gcap { font-size: 10px; padding: 8px 3px 2px; }
+/* The like and comment chrome is noise at this size; it's still on the photo
+   when you open one. */
+.gallery.strip .like,
+.gallery.strip .gcmt { display: none; }
+
+/* ---- avatars ----
+   An avatar is either an emoji character or a drawn moustache. Both go through
+   avatarHtml(), so everything that shows one needs to cope with either. */
+.mo-svg { vertical-align: -0.15em; }
+.avatar-emoji { font-size: 1.05em; line-height: 1; }
+/* The picker: wider chips, because a moustache is twice as wide as it is tall
+   and a square chip would crop it to nothing. */
+.chips.avatars { gap: 6px; }
+.chips.avatars .chip {
+  padding: 10px 12px; min-width: 56px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+/* The row avatar sits in a fixed column so names line up down the list
+   whether someone picked a Pencil or a Hungarian. */
+.friend-row .av, .board-head .av {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; flex: none;
+}
