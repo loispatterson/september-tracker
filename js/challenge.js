@@ -33,6 +33,9 @@ export const CHALLENGES = {
     fundraising: false,
     roles: ["participant"],
     promptPool: null,              /* null = the stock fun-prompt deck */
+    /* Which tabs exist. Progress is built around exercise minutes and
+       distance, so it has nothing to say where there is no exercise. */
+    tabs: ["today", "board", "gallery", "progress", "profile"],
     other: null,
   },
 
@@ -56,6 +59,7 @@ export const CHALLENGES = {
     fundraising: true,
     roles: ["participant", "viewer"],
     promptPool: null,
+    tabs: ["today", "board", "gallery", "profile"],
     /* The other challenge this engine runs. Separate origin, so this cannot be
        a link into a working account — it is an interest probe. */
     other: {

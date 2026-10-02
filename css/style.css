@@ -480,3 +480,26 @@ nav.tabs button.on { color: var(--accent); font-weight: 600; }
 /* A day with comments on it. Ringed rather than recoloured, so it reads as
    "there is more here" without competing with the fun and photo states. */
 .cell .fun-dot.talked { box-shadow: 0 0 0 2px var(--accent); }
+
+/* ---- Cairn ---- */
+/* A fundraising link is a thing people are meant to tap, so it gets a target
+   rather than being raw underlined blue in the middle of a card. */
+.sponsor-link {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 14px; font-weight: 600;
+  color: var(--accent); text-decoration: none;
+  padding: 8px 0;
+  overflow-wrap: anywhere;
+}
+.sponsor-link:hover { text-decoration: underline; }
+.sponsor-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 12px; border-radius: 8px;
+  background: var(--accent); color: #fff;
+  font-size: 13px; font-weight: 600; text-decoration: none;
+}
+.sponsor-btn:active { opacity: .85; }
+/* Everyone's total, stated once rather than ranked. A leaderboard of charity
+   money is a bad idea and the figures are self-reported anyway. */
+.raised-total { font-size: 15px; margin: 4px 0 0; }
+.raised-total b { font-size: 18px; }

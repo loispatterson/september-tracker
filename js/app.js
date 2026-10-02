@@ -6,7 +6,9 @@ import { currentStreak, bestStreak, totalHits, dayResult, HIT, MISS, PENDING } f
 import { getSuggestions, getAiSuggestions, aiAvailable } from "./suggestions.js";
 import { funPromptFor } from "./fun.js";
 import { AGE_BANDS, GOALS, FITNESS, FEELINGS, isLegacyBand } from "./profile.js";
-import { activeUsers, orderedActivities, buildLogs, minutesOf, prettyMinutes, describeEntry, totalMinutes,
+import { challengeConfig } from "./challenge.js";
+import { participants, viewers, isViewer, activeUsers, orderedActivities, buildLogs,
+         minutesOf, prettyMinutes, describeEntry, totalMinutes,
          feelingLabel, DEFAULT_MINUTES } from "./logs.js";
 import { galleryItems } from "./imageutil.js";
 import { prepareUpload, blobToBase64, hydratePhotos, forgetPhoto, cachedUrl } from "./photos.js";
@@ -17,6 +19,15 @@ const EMOJIS = ["💪", "🏃", "🚴", "🧘", "🏊", "⚡", "🔥", "🌟", "
 
 /* ---------- state ---------- */
 let board = { users: [], entries: [], funIdeas: [] };
+
+/* Which challenge this deployment runs.
+
+   Cached in localStorage because the first paint happens before /api/board
+   answers: without it, launching from a home-screen icon flashes the wrong
+   name and strapline for a second, which looks broken. refresh() corrects it
+   from the server, which is always the authority. */
+const CHALLENGE_KEY = "tracker.challenge";
+let cfg = challengeConfig(localStorage.getItem(CHALLENGE_KEY));
 let me = null;                    /* { id, name } from localStorage */
 let exLog = {}, funLog = {}, photoLog = {};   /* log[date][userId] = entry */
 let suggestions = [];
@@ -122,6 +133,10 @@ let loadedBuild = null;
 async function refresh() {
   try {
     board = await api.getBoard(ui.month || undefined);
+    if (board.challenge && board.challenge !== cfg.id) {
+      cfg = challengeConfig(board.challenge);
+      try { localStorage.setItem(CHALLENGE_KEY, cfg.id); } catch {}
+    }
     if (loadedBuild === null) loadedBuild = board.build || null;
     else if (board.build && board.build !== loadedBuild) return updateAvailable();
     ui.needPasscode = false;
@@ -215,15 +230,20 @@ function signedOut() {
    while the board is still loading. */
 function renderSplash() {
   return `<div class="onboard splash">
-    <h2>${monthName()} Tracker</h2>
-    <p>30 minutes of exercise and one fun thing, every day of ${monthName()},
-       tracked with your friends on a shared board.</p>
+    <h2>${esc(appTitle())}</h2>
+    <p>${esc(cfg.tagline)}${cfg.hasExercise
+      ? `, every day of ${monthName()}, tracked with your friends on a shared board.` : "."}</p>
     <ul class="splash-list">
+      ${cfg.hasExercise ? `
       <li>💪 Log what you did, how long it took and how it felt</li>
       <li>🎉 A different fun idea every day, or bring your own</li>
       <li>📸 Add a photo, and a gallery builds up over the month</li>
       <li>🔥 Streaks for exercise, fun and photos</li>
-      <li>🤖 Workout suggestions tuned to your age, goals and fitness</li>
+      <li>🤖 Workout suggestions tuned to your age, goals and fitness</li>` : `
+      <li>🥸 A photo a day, and watch thirty days of it build up</li>
+      <li>👀 Your friends see it, and can cheer you on</li>
+      <li>💬 Comments on any day, from anyone watching</li>
+      <li>💷 Your own fundraising page, one tap away for sponsors</li>`}
     </ul>
     <button class="btn primary big" data-action="demo-login" ${ui.demoBusy ? "disabled" : ""}>
       ${ui.demoBusy ? "Setting up…" : "Have a look around"}</button>
@@ -317,13 +337,60 @@ function renderOnboard() {
 
   return `<div class="onboard">
     <h2>Who are you?</h2>
-    <p class="muted small">30 minutes of exercise + one fun thing, every day of ${monthName()}.</p>
+    <p class="muted small">${esc(cfg.tagline)}${cfg.hasExercise ? `, every day of ${monthName()}.` : "."}</p>
     <div class="members">
-      ${board.users.map(u =>
+      ${/* Participants only. On a public board the sponsor list could run to
+            dozens and is nobody else's business; a viewer types their name
+            instead, below. */
+        participants(board.users).map(u =>
         `<button class="btn" data-action="claim" data-id="${u.id}">${u.emoji} ${esc(u.name)}</button>`).join("")}
     </div>
     <button class="btn primary big" data-action="onboard-step" data-val="new">I'm new — set me up</button>
+    ${viewers(board.users).length ? `<p class="small muted">
+      Here to cheer someone on? <button class="linkish" data-action="onboard-step" data-val="who-viewer">Find your name</button></p>` : ""}
   </div>`;
+}
+
+function renderFriendsCard(friends, quiet) {
+  return `<div class="card">
+      <h2>Everyone today</h2>
+      <div class="friends">${friends}</div>
+      <p class="small muted" style="margin-bottom:0">${
+        cfg.photoIsTheLog ? "🥸 posted" : "✅ exercise · 🎉 fun"}${
+        quiet.length ? ` · <button class="linkish" data-action="show-all">+${
+          quiet.length} quiet</button>` : ""}</p>
+    </div>`;
+}
+
+/* Your own fundraising page, and a nudge to add one if it is missing. A
+   participant with no link is invisible to sponsors, which is the whole
+   point, so the empty state is a prompt rather than a blank. */
+function renderSponsorCard() {
+  if (!cfg.fundraising) return "";
+  const mine = getUser(me.id) || {};
+  if (isViewer(mine)) return "";
+  if (!mine.fundraising_url) {
+    return `<div class="card">
+      <h2>💷 Your fundraising page</h2>
+      <p class="small muted">Nobody can sponsor you until this is here. Paste
+        the link from your Movember page and it appears on your days.</p>
+      <button class="btn primary" data-action="tab" data-tab="profile">Add the link</button>
+    </div>`;
+  }
+  return `<div class="card">
+      <h2>💷 Your fundraising page</h2>
+      <a class="sponsor-link" href="${esc(mine.fundraising_url)}" target="_blank"
+         rel="noopener noreferrer">${esc(mine.fundraising_url.replace(/^https:\/\//, ""))} ↗</a>
+      <div class="actions">
+        <button class="btn ghost small" data-action="copy-share">Copy my link</button>
+      </div>
+    </div>`;
+}
+
+/* The name shown in the header, the tab and on a home screen. The wellbeing
+   board renames itself every month; Cairn is just Cairn. */
+function appTitle() {
+  return cfg.hasExercise ? `${monthName()} Tracker` : cfg.appName;
 }
 
 /* ---------- today ---------- */
@@ -440,15 +507,22 @@ function renderToday() {
   /* --- friends strip ---
      Same three-week rule as the board. A strip of ⬜⬜ from people who stopped
      in week one makes today look like nobody is doing this. */
+  /* Participants only: a viewer has nothing to post, so a row of empty boxes
+     next to their name would read as them failing at something they never
+     signed up for. */
   const { shown: activeToday, hidden: quietToday } =
-    activeUsers(board.users, realToday, me && me.id, ui.showAll);
+    activeUsers(participants(board.users), realToday, me && me.id, ui.showAll);
   const friends = activeToday.map(u => {
     const e = entryFor(exLog, today, u.id), f = entryFor(funLog, today, u.id);
+    const posted = f && f.done && f.photo_id;
     return `<div class="friend-row">
       <span>${u.emoji}</span>
       <span class="name">${esc(u.name)}${u.id === me.id ? " <span class='muted small'>(you)</span>" : ""}</span>
-      ${e && e.done ? `<span class="small muted">${esc(prettyMinutes(minutesOf(e)))}</span>` : ""}
-      <span class="marks">${e && e.done ? "✅" : "⬜"}${f && f.done ? "🎉" : "⬜"}</span>
+      ${cfg.hasExercise && e && e.done
+        ? `<span class="small muted">${esc(prettyMinutes(minutesOf(e)))}</span>` : ""}
+      <span class="marks">${cfg.photoIsTheLog
+        ? (posted ? cfg.dayEmoji : "⬜")
+        : `${e && e.done ? "✅" : "⬜"}${f && f.done ? "🎉" : "⬜"}`}</span>
     </div>`;
   }).join("");
 
@@ -462,6 +536,26 @@ function renderToday() {
     ${today !== realToday ? `<p class="small muted">Catching up on ${esc(prettyDate(today))}.
       <button class="btn ghost small" data-action="day-today">Back to today</button></p>` : ""}`;
 
+  /* On Cairn the camera IS the log: no "did it" button, no fun-idea deck, no
+     exercise card. api/photo.js already creates the day's entry on upload, so
+     no photo means no day — which is what makes "days posted out of 30"
+     exactly countable rather than a box somebody ticked. */
+  if (cfg.photoIsTheLog) {
+    const posted = fun && fun.done && fun.photo_id;
+    return `
+    ${dayNav}
+    <div class="card">
+      <h2>${cfg.dayEmoji} ${esc(cfg.dayLabel)}</h2>
+      ${posted
+        ? `<p class="small muted">Posted for ${esc(prettyDate(today))}. Day ${
+             monthDayNum(today, today)} of ${monthLength()}.</p>`
+        : `<p class="small muted">A photo is the whole thing. Point, tap, done.</p>`}
+      ${photoSection(today, fun)}
+    </div>
+    ${renderSponsorCard()}
+    ${renderFriendsCard(friends, quietToday)}`;
+  }
+
   return `
     ${dayNav}
     <div class="card">
@@ -472,13 +566,7 @@ function renderToday() {
       <h2>🎉 Something fun</h2>
       ${funHtml}
     </div>
-    <div class="card">
-      <h2>Everyone today</h2>
-      <div class="friends">${friends}</div>
-      <p class="small muted" style="margin-bottom:0">✅ exercise · 🎉 fun${
-        quietToday.length ? ` · <button class="linkish" data-action="show-all">+${
-          quietToday.length} quiet</button>` : ""}</p>
-    </div>`;
+    ${renderFriendsCard(friends, quietToday)}`;
 }
 
 /* ---------- photos ---------- */
@@ -1090,8 +1178,8 @@ function render() {
      whole app renames itself without a deploy. The tab matters more than it
      looks: added to a phone's home screen, this is the name under the icon. */
   const titleEl = document.getElementById("apptitle");
-  if (titleEl) titleEl.textContent = `${monthName()} Tracker`;
-  document.title = `${monthName()} Tracker`;
+  if (titleEl) titleEl.textContent = appTitle();
+  document.title = appTitle();
 
   /* Demo: the splash replaces the bare "Loading…" and stays until the visitor
      picks a door. isDemo is only known once the board answers, so a first
@@ -1111,7 +1199,15 @@ function render() {
   }
 
   tabs.classList.remove("hidden");
-  for (const b of tabs.querySelectorAll("button")) b.classList.toggle("on", b.dataset.tab === ui.tab);
+  for (const b of tabs.querySelectorAll("button")) {
+    /* A challenge only shows the tabs it has anything to put in. Progress is
+       built on exercise minutes and distance, so on Cairn it would be four
+       empty cards. */
+    b.hidden = !cfg.tabs.includes(b.dataset.tab);
+    b.classList.toggle("on", b.dataset.tab === ui.tab);
+  }
+  /* Never leave someone stranded on a tab this challenge doesn't have. */
+  if (!cfg.tabs.includes(ui.tab)) ui.tab = "today";
   if (ui.tab === "today") show("view-today", renderToday());
   else if (ui.tab === "board") show("view-board", renderBoard());
   else if (ui.tab === "gallery") show("view-gallery", renderGallery());
@@ -1682,6 +1778,16 @@ async function onClick(ev) {
       toast("PIN updated");
       render();
     } catch (e) { if (isAuthError(e)) return signedOut(); toast(errorMessage(e)); }
+    return;
+  }
+
+  /* Share your own fundraising page, not the app's address. The whole point
+     is that sponsors land where they can give. */
+  if (a === "copy-share") {
+    const mine = getUser(me.id) || {};
+    const text = mine.fundraising_url || location.origin;
+    try { await navigator.clipboard.writeText(text); toast("Link copied"); }
+    catch { toast(text); }
     return;
   }
 
