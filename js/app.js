@@ -1246,33 +1246,7 @@ async function onClick(ev) {
   if (a === "photo-cancel") { clearDraft(); ui.photoError = ""; render(); return; }
 
   if (a === "photo-confirm") {
-    const ds = el.dataset.date;
-    const draft = ui.photoDraft;
-    if (!draft || draft.date !== ds) return;
-    ui.photoBusy = true; ui.photoError = ""; render();
-    try {
-      /* A photo needs a fun entry to attach to. The server creates one if it's
-         missing, but logging here first keeps the local view honest. */
-      const existing = entryFor(funLog, ds, me.id);
-      const activity = existing && existing.activity
-        ? existing.activity
-        : funPromptFor(me.id, ds, board.funIdeas, ui.funSwap);
-      const b64 = await blobToBase64(draft.blob);
-      const old = existing && existing.photo_id;
-      await api.uploadPhoto({ date: ds, b64, mime: "image/jpeg", w: draft.w, h: draft.h, activity });
-      if (old) forgetPhoto(old);
-      clearDraft();
-      await refresh();
-      toast("Photo added 📸");
-    } catch (e) {
-      console.error(e);
-      if (isAuthError(e)) { ui.photoBusy = false; return signedOut(); }
-      ui.photoError = errorMessage(e) || "Couldn't upload that photo";
-    } finally {
-      ui.photoBusy = false;
-      ui.photoTarget = null;
-      render();
-    }
+    await uploadDraft(el.dataset.date);
     return;
   }
 
@@ -1734,6 +1708,39 @@ function clearDraft() {
   ui.photoDraft = null;
 }
 
+/* Send the prepared draft. Split out of the click handler so the picker can
+   call it straight away: a photo that sits in a draft waiting for a second tap
+   gets lost. On iOS the photo picker can push the page out of memory, and the
+   draft only ever lived in a variable. */
+async function uploadDraft(ds) {
+  const draft = ui.photoDraft;
+  if (!draft || draft.date !== ds) return;
+  ui.photoBusy = true; ui.photoError = ""; render();
+  try {
+    /* A photo needs a fun entry to attach to. The server creates one if it's
+       missing, but logging here first keeps the local view honest. */
+    const existing = entryFor(funLog, ds, me.id);
+    const activity = existing && existing.activity
+      ? existing.activity
+      : funPromptFor(me.id, ds, board.funIdeas, ui.funSwap);
+    const b64 = await blobToBase64(draft.blob);
+    const old = existing && existing.photo_id;
+    await api.uploadPhoto({ date: ds, b64, mime: "image/jpeg", w: draft.w, h: draft.h, activity });
+    if (old) forgetPhoto(old);
+    clearDraft();
+    await refresh();
+    toast("Photo added 📸");
+  } catch (e) {
+    console.error(e);
+    if (isAuthError(e)) { ui.photoBusy = false; return signedOut(); }
+    ui.photoError = errorMessage(e) || "Couldn't upload that photo";
+  } finally {
+    ui.photoBusy = false;
+    ui.photoTarget = null;
+    render();
+  }
+}
+
 async function onPhotoPicked(ev) {
   const file = ev.target.files && ev.target.files[0];
   /* Reset immediately so picking the same file again still fires a change. */
@@ -1744,8 +1751,18 @@ async function onPhotoPicked(ev) {
   try {
     const draft = await prepareUpload(file);
     /* The day the picker was opened for; the day on screen otherwise. */
-    draft.date = ui.photoTarget || viewDate();
+    const ds = ui.photoTarget || viewDate();
+    draft.date = ds;
     ui.photoDraft = draft;
+    /* Send it now rather than waiting for a second tap. The old flow showed a
+       preview with a "Use this photo" button, which looked finished and was
+       not: miss that tap and the photo is gone, and on iOS the picker can
+       evict the page from memory and take the draft with it. Replace and
+       Remove already cover changing your mind, so the extra step only ever
+       cost people photos. */
+    ui.photoBusy = false;
+    await uploadDraft(ds);
+    return;
   } catch (e) {
     console.error(e);
     ui.photoError = e && e.code === "decode"
