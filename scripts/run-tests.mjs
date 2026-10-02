@@ -6,6 +6,7 @@ const { validatePhoto, newPhotoId, b64Bytes, stripDataUrl, validPhotoDate, MAX_B
   await import("../api/_lib/photos.js");
 const { validEntryDate } = await import("../api/_lib/month.js");
 const { challengeFromEnv } = await import("../api/_lib/challenge.js");
+const { whichDb } = await import("../api/_lib/which-db.mjs");
 const { readdirSync } = await import("node:fs");
 
 let { pass, fail } = runSelfTests();
@@ -109,6 +110,22 @@ const { galleryItems } = await import("../js/imageutil.js");
   check("nobody logged yet still gives a stable order",
     order([{ name: "Bo", total: 0, cur: 0, best: 0 },
            { name: "Ada", total: 0, cur: 0, best: 0 }]), ["Ada", "Bo"]);
+}
+
+/* ---- telling the three databases apart ----
+   Two of them are called neondb and the demo shares an endpoint with the live
+   board, so neither half identifies them alone. These are the cases that would
+   point a seeding or wiping script at the friends' live data. */
+{
+  const live  = "postgresql://u:p@ep-nameless-silence-abc-pooler.eu-west-2.aws.neon.tech/neondb?sslmode=require";
+  const demo  = "postgresql://u:p@ep-nameless-silence-abc-pooler.eu-west-2.aws.neon.tech/septdemo?sslmode=require";
+  const cairn = "postgresql://u:p@ep-holy-cherry-zao9eayq-pooler.c-2.eu-west-2.aws.neon.tech/neondb?sslmode=require";
+  check("the live board", whichDb(live), "live");
+  check("the demo, same endpoint different database", whichDb(demo), "demo");
+  check("cairn, same database name different endpoint", whichDb(cairn), "cairn");
+  check("anything else is unknown",
+    whichDb("postgresql://u:p@ep-somewhere.neon.tech/neondb"), "unknown");
+  check("no url is unknown", whichDb(""), "unknown");
 }
 
 /* ---- the Vercel Hobby function cap ----
