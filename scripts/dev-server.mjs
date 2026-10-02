@@ -14,6 +14,8 @@ import { hashPin, verifyPin, validPin, newToken, MAX_FAILS, LOCKOUT_MINUTES } fr
 import { validatePhoto, newPhotoId, stripDataUrl, b64Bytes } from "../api/_lib/photos.js";
 import { validEntryDate, ENTRY_DATE_ERROR } from "../api/_lib/month.js";
 import { reconcileActivity } from "../api/_lib/activity.js";
+import { challengeFromEnv } from "../api/_lib/challenge.js";
+import { cleanFundraisingUrl } from "../api/_lib/fundraising.js";
 import { validAgeBand, cleanGoals, cleanNote, FITNESS, validFeeling } from "../api/_lib/profile.js";
 
 const ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..");
@@ -74,11 +76,20 @@ async function apiRoute(req, res, path, q) {
       ? d.users.filter(u => !/^Guest \d+$/.test(u.name) || u.id === viewer)
       : d.users;
     const ids = new Set(visible.map(u => u.id));
+    /* one row per person per day they opened the app — see api/board.js */
+    if (viewer) {
+      d.userDays = d.userDays || {};
+      d.userDays[viewer + "|" + new Date().toISOString().slice(0, 10)] = true;
+      await put(d);
+    }
     return send(res, 200, {
       /* name + avatar only — profile fields are private, see /api/me */
       users: visible.map(u => ({
         id: u.id, name: u.name, emoji: u.emoji, joined: u.joined,
         has_pin: !!u.pin_hash,
+        /* every user, viewers included, each carrying its role — see api/board.js */
+        role: u.role || "participant",
+        fundraising_url: u.fundraising_url || null,
         /* mirrors api/board.js: last day they logged, or the day they joined */
         last_active: d.entries
           .filter(e => e.user_id === u.id && e.done)
@@ -108,7 +119,11 @@ async function apiRoute(req, res, path, q) {
             .sort((a, b) => b.n - a.n).slice(0, 12)
         : [],
       funIdeas: d.funIdeas,
+      raised: Object.entries(d.raised || {}).map(([user_id, r]) => ({ user_id, ...r })),
       month,
+      challenge: challengeFromEnv().id,
+      vapidPublicKey: process.env.VAPID_PUBLIC_KEY || null,
+      open: !PASSCODE,
       build: "dev",
       demo: process.env.DEMO_MODE === "1",
     });
@@ -135,6 +150,10 @@ async function apiRoute(req, res, path, q) {
 
   if (path === "/api/photo" && req.method === "POST") {
     if (!userId) return needAuth();
+    /* mirrors api/photo.js: a photo IS the day on Cairn */
+    if ((d.users.find(u => u.id === userId) || {}).role === "viewer") {
+      return send(res, 403, { error: "viewers don't post photos" });
+    }
     const payload = await body(req);
     const { date, mime, w, h, activity } = payload;
     const b64 = stripDataUrl(payload.b64);
@@ -164,26 +183,44 @@ async function apiRoute(req, res, path, q) {
 
   if (path === "/api/users" && req.method === "POST") {
     const payload = await body(req);
-    const { name, emoji, ageBand, fitness, note, pin } = payload;
+    const cfg = challengeFromEnv();
+    const { name, emoji, ageBand, fitness, note, pin, cheering } = payload;
     const goals = cleanGoals(payload.goals);
     const cleanName = String(name || "").trim().slice(0, 40);
+
+    /* mirrors api/users.js: viewers never answer the fitness questionnaire */
+    const asked = String(payload.role || "participant");
+    const role = cfg.roles.includes(asked) ? asked : "participant";
+    const isViewer = role === "viewer";
+    const fundraisingUrl = cfg.fundraising && !isViewer
+      ? cleanFundraisingUrl(payload.fundraisingUrl) : "";
+
     if (!cleanName) return send(res, 400, { error: "name required" });
-    if (!validAgeBand(ageBand)) return send(res, 400, { error: "bad ageBand" });
-    if (!goals.length) return send(res, 400, { error: "pick at least one goal" });
-    if (!FITNESS.includes(fitness)) return send(res, 400, { error: "bad fitness level" });
     if (!validPin(pin)) return send(res, 400, { error: "PIN must be 4 digits" });
+    if (!isViewer) {
+      if (!validAgeBand(ageBand)) return send(res, 400, { error: "bad ageBand" });
+      if (!goals.length) return send(res, 400, { error: "pick at least one goal" });
+      if (!FITNESS.includes(fitness)) return send(res, 400, { error: "bad fitness level" });
+    }
     if (d.users.some(u => u.name === cleanName)) return send(res, 409, { error: "name taken" });
+
+    const band = isViewer ? "30-44" : ageBand;
+    const goalList = isViewer ? ["general"] : goals;
+    const fit = isViewer ? "occasional" : fitness;
+
     const id = "u_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     const now = new Date();
     const joined = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
     d.users.push({ id, name: cleanName, emoji: String(emoji || "💪").slice(0, 8),
-                   age_band: ageBand, goal: goals[0], goals: goals.join(","),
-                   fitness, note: cleanNote(note), joined,
+                   age_band: band, goal: goalList[0], goals: goalList.join(","),
+                   fitness: fit, note: isViewer ? null : cleanNote(note), joined,
+                   role, fundraising_url: fundraisingUrl || null,
+                   cheering: cheering ? String(cheering).slice(0, 40) : null,
                    pin_hash: hashPin(pin), pin_fails: 0, pin_locked_until: null });
     const t = newToken();
     d.sessions[t] = id;
     await put(d);
-    return send(res, 200, { id, token: t });
+    return send(res, 200, { id, token: t, role });
   }
 
   if (path === "/api/demo" && req.method === "POST") {
@@ -321,6 +358,15 @@ async function apiRoute(req, res, path, q) {
     const { emoji, ageBand, fitness, note } = payload;
     const u = d.users.find(x => x.id === userId);
     if (!u) return send(res, 400, { error: "unknown user" });
+    /* mirrors api/users.js PATCH */
+    if (payload.fundraisingUrl !== undefined) {
+      const url = cleanFundraisingUrl(payload.fundraisingUrl);
+      if (payload.fundraisingUrl && !url) {
+        return send(res, 400, { error: "That doesn't look like a Movember or JustGiving page" });
+      }
+      u.fundraising_url = url || null;
+    }
+    if (payload.notify !== undefined) u.notify = !!payload.notify;
     if (payload.name !== undefined) {
       const nm = String(payload.name || "").trim().slice(0, 40);
       if (!nm) return send(res, 400, { error: "name can't be empty" });
@@ -368,6 +414,10 @@ async function apiRoute(req, res, path, q) {
     const feeling = validFeeling(logBody.feeling) ? logBody.feeling : null;
     if (!validEntryDate(date)) return send(res, 400, { error: ENTRY_DATE_ERROR });
     if (kind !== "exercise" && kind !== "fun") return send(res, 400, { error: "bad kind" });
+    /* mirrors api/log.js */
+    if ((d.users.find(u => u.id === userId) || {}).role === "viewer") {
+      return send(res, 403, { error: "viewers don't log days" });
+    }
     d.entries = d.entries.filter(e => !(e.user_id === userId && e.date === date && e.kind === kind));
     /* Production has ON DELETE CASCADE on entry_photos; there are no foreign
        keys here, so the cascade has to be written by hand or un-logging a fun
