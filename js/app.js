@@ -7,6 +7,7 @@ import { getSuggestions, getAiSuggestions, aiAvailable } from "./suggestions.js"
 import { funPromptFor } from "./fun.js";
 import { AGE_BANDS, GOALS, FITNESS, FEELINGS, isLegacyBand } from "./profile.js";
 import { challengeConfig } from "./challenge.js";
+import { detect, installState, PLATFORM } from "./install.js";
 import { avatarHtml, avatarName, avatarChoices, defaultAvatar,
          COLOURS, colourFor, withColour, splitAvatar } from "./avatars.js";
 import { participants, viewers, isViewer, activeUsers, orderedActivities, buildLogs,
@@ -54,6 +55,7 @@ const ui = {
   funOwn: false,
   thread: null,                   /* { owner, date, comments, loading, busy, error } */
   summary: null,                  /* { months, totals } once the Progress tab is opened */
+  canPrompt: false,               /* Chrome offered us a real install dialog */
   showAll: false,                 /* reveal people who have drifted away */
   month: null,                    /* the month the Board and Photos show; null = this one */
   exOther: false,                 /* "Other…" free-text entry is open */
@@ -420,6 +422,50 @@ function renderSponsorCard() {
         <button class="btn ghost small" data-action="copy-share">Copy my link</button>
       </div>
     </div>`;
+}
+
+/* Getting onto a home screen.
+
+   Shown only where it can actually be acted on. An iPhone in Chrome cannot
+   install at all, so that gets told to switch browser rather than being
+   given steps that will not work; and anyone already running from an icon
+   gets nothing, because the card has nothing left to say. */
+function renderInstallCard() {
+  const { platform, standalone, iosSafari } = detect();
+  const state = installState({ platform, standalone, canPrompt: ui.canPrompt, iosSafari });
+  if (state === "installed" || state === "other") return "";
+
+  if (state === "can-prompt") {
+    return `<div class="card">
+      <h2>📲 Add to your home screen</h2>
+      <p class="small muted">Opens full screen, and it's how reminders will
+        reach you later.</p>
+      <button class="btn primary" data-action="install">Add ${esc(cfg.appName)}</button>
+    </div>`;
+  }
+
+  if (state === "ios-wrong-browser") {
+    return `<div class="card">
+      <h2>📲 Add to your home screen</h2>
+      <p class="small muted">Only Safari can do this on an iPhone. Open
+        this page in Safari and the steps will appear here.</p>
+    </div>`;
+  }
+
+  /* iOS Safari: three taps, spelled out, because there is no prompt we can
+     trigger and no way to detect whether they have done it until they open
+     the app from the icon. */
+  return `<div class="card">
+    <h2>📲 Add to your home screen</h2>
+    <ol class="steps">
+      <li>Tap <b>Share</b> at the bottom of Safari <span class="muted">(the square with an arrow)</span></li>
+      <li>Scroll down and tap <b>Add to Home Screen</b></li>
+      <li>Open ${esc(cfg.appName)} from the new icon</li>
+    </ol>
+    <p class="small muted">Worth doing: it opens full screen without the
+      browser bars, and on an iPhone it's the only way reminders can ever
+      reach you.</p>
+  </div>`;
 }
 
 /* Style and colour are picked separately: seventeen styles times eleven
@@ -1004,6 +1050,7 @@ function renderProfile() {
   if (!p) return "";
   const ideas = board.funIdeas || [];
   return `
+    ${renderInstallCard()}
     <div class="card">
       <h2>Your profile</h2>
       <div class="field">
@@ -1261,6 +1308,16 @@ function render() {
   const titleEl = document.getElementById("apptitle");
   if (titleEl) titleEl.textContent = appTitle();
   document.title = appTitle();
+  /* The install metadata is in the HTML, which is shared between challenges,
+     so point it at the right one once the board has told us which this is.
+     iOS reads these from the live DOM at the moment someone taps Add to Home
+     Screen, so updating them here is enough. */
+  const man = document.getElementById("manifest");
+  if (man) man.href = `/manifest-${cfg.id}.json`;
+  const iosIcon = document.getElementById("ios-icon");
+  if (iosIcon) iosIcon.href = `/icons/${cfg.id}/apple-touch-icon.png`;
+  const iosTitle = document.getElementById("ios-title");
+  if (iosTitle) iosTitle.content = cfg.appName;
 
   /* Demo: the splash replaces the bare "Loading…" and stays until the visitor
      picks a door. isDemo is only known once the board answers, so a first
@@ -1600,6 +1657,20 @@ async function onClick(ev) {
     } else {
       ui.draft[el.dataset.key] = el.dataset.val;
     }
+    render();
+    return;
+  }
+
+  /* Chrome hands us the install dialog to fire at a moment of our choosing.
+     It can only be used once, so the saved event is dropped afterwards. */
+  if (a === "install") {
+    const ev = window.__installPrompt;
+    if (!ev) return toast("Use your browser's menu to add this to your home screen");
+    window.__installPrompt = null;
+    ui.canPrompt = false;
+    ev.prompt();
+    const { outcome } = await ev.userChoice;
+    if (outcome === "accepted") toast("Added 📲");
     render();
     return;
   }
@@ -1975,6 +2046,15 @@ async function onPhotoPicked(ev) {
 
 async function boot() {
   try { me = JSON.parse(localStorage.getItem(ME_KEY) || "null"); } catch { me = null; }
+  /* Chrome fires this instead of showing its own banner, so we keep it and
+     offer the dialog from the You tab where there is room to say why. */
+  window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault();
+    window.__installPrompt = e;
+    ui.canPrompt = true;
+    renderUnlessTyping();
+  });
+
   document.addEventListener("click", onClick);
   document.addEventListener("submit", onSubmit);
   document.getElementById("photo-input").addEventListener("change", onPhotoPicked);

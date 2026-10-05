@@ -5,6 +5,7 @@ import { FUN_PROMPTS } from "./data/fun-prompts.js";
 import { reconcileActivity, foldActivityCounts, cleanActivity }
   from "../api/_lib/activity.js";
 import { CHALLENGES, challengeConfig, shouldShowPromo } from "./challenge.js";
+import { platformOf, isIosSafari, installState, PLATFORM } from "./install.js";
 import { avatarHtml, avatarName, avatarChoices, defaultAvatar, MOUSTACHE_KEYS,
          MOUSTACHES, isMoustache, COLOURS, colourFor, withColour,
          splitAvatar } from "./avatars.js";
@@ -271,6 +272,38 @@ export function runSelfTests() {
   check("the most-used spelling wins, whatever the order",
     foldActivityCounts([{ activity: "body pump", n: 1 }, { activity: "Body Pump", n: 3 }])[0].activity,
     "Body Pump");
+
+  /* ---- getting onto a home screen ----
+     This is load-bearing on iOS: no Home Screen icon means no web push, ever.
+     So the detection has to be right about which device is which. */
+  {
+    const UA = {
+      iphone:  "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1",
+      chrios:  "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 CriOS/120 Mobile/15E148 Safari/604.1",
+      ipad:    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/17.0 Safari/605.1.15",
+      android: "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36",
+    };
+    check("an iPhone is iOS", platformOf(UA.iphone), PLATFORM.IOS);
+    /* iPadOS claims to be a Mac; the touchscreen is the only tell */
+    check("an iPad pretending to be a Mac", platformOf(UA.ipad, 5), PLATFORM.IOS);
+    check("a real Mac is not", platformOf(UA.ipad, 0), PLATFORM.OTHER);
+    check("Android is Android", platformOf(UA.android), PLATFORM.ANDROID);
+    check("Safari on iOS can install", isIosSafari(UA.iphone), true);
+    check("Chrome on iOS cannot", isIosSafari(UA.chrios), false);
+
+    const st = o => installState(o);
+    check("already installed says nothing",
+      st({ platform: PLATFORM.IOS, standalone: true, canPrompt: false, iosSafari: true }), "installed");
+    check("iPhone in Safari gets the steps",
+      st({ platform: PLATFORM.IOS, standalone: false, canPrompt: false, iosSafari: true }), "ios-steps");
+    /* telling a Chrome-on-iPhone user to tap Share sends them nowhere */
+    check("iPhone in Chrome gets told to switch",
+      st({ platform: PLATFORM.IOS, standalone: false, canPrompt: false, iosSafari: false }), "ios-wrong-browser");
+    check("Android gets a real button",
+      st({ platform: PLATFORM.ANDROID, standalone: false, canPrompt: true, iosSafari: false }), "can-prompt");
+    check("a desktop gets nothing",
+      st({ platform: PLATFORM.OTHER, standalone: false, canPrompt: false, iosSafari: true }), "other");
+  }
 
   /* ---- avatars ---- */
   check("every moustache has a name and a path",
