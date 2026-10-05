@@ -42,6 +42,12 @@ export const api = {
   suggest: (date) => post("/api/suggest", { date }),
   createUser: (profile) => post("/api/users", profile),
   updateUser: (patch) => request("/api/users", { method: "PATCH", body: JSON.stringify(patch) }),
+  /* Multiplexed onto /api/me rather than given api/push.js, because Vercel
+     Hobby allows twelve functions and api/ holds exactly twelve. */
+  savePush: (subscription) =>
+    request("/api/me?view=push", { method: "POST", body: JSON.stringify({ subscription }) }),
+  dropPush: (endpoint) =>
+    request("/api/me?view=push", { method: "POST", body: JSON.stringify({ remove: true, subscription: { endpoint } }) }),
   claim: (userId, pin) => post("/api/claim", { userId, pin }),
   changePin: (currentPin, newPin) => post("/api/pin", { currentPin, newPin }),
   saveEntry: (entry) => post("/api/log", entry),

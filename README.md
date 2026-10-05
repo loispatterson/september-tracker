@@ -57,6 +57,42 @@ hand, buys a series that is certainly right.
 names and faces on it, so that request has to have an answer on the evening
 somebody makes it.
 
+## Notifications
+
+One evening nudge to people who haven't posted, and a late one only to someone
+with a streak worth saving. Never on a day you've already posted — a
+notification that arrives when there's nothing to do teaches people to swipe
+the next one away unread.
+
+Sending runs in **GitHub Actions, not on Vercel**. Hobby allows twelve
+serverless functions and `api/` holds exactly twelve, so a sender there would
+be the thirteenth and the deploy would fail quietly. Hobby cron also fires once
+a day with no control over the hour.
+
+Setting it up, once:
+
+```sh
+node scripts/vapid-keys.mjs     # prints both keys and where each one goes
+```
+
+The public key goes in `VAPID_PUBLIC_KEY` on Vercel **and** in GitHub Actions
+secrets. The private key goes in GitHub secrets **only** — nothing in `api/`
+sends a notification, so the deployment has no reason to be able to. Generate
+once and keep them: changing the keys invalidates every subscription already
+issued, and every phone stops receiving with nothing in any log to say why.
+
+Until `VAPID_PUBLIC_KEY` is set, the notifications row hides itself and the
+app behaves exactly as it did before.
+
+To test without waking anyone: Actions → **nudge** → Run workflow, leaving
+*print instead of sending* ticked.
+
+**On an iPhone** push only works once the app has been added to the Home Screen
+and opened from that icon — three manual taps no code can trigger. The You tab
+shows the steps and hides the enable button until then, because a button that
+cannot work reads as the app being broken. Expect roughly a third of iPhone
+users not to complete it.
+
 ## Tests
 
 ```bash

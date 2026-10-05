@@ -169,6 +169,90 @@ check("three decimals are refused", parseAmount("12.345"), null);
   check(`api/ has ${fns.length} functions, Vercel Hobby allows 12`, fns.length <= 12, true);
 }
 
+/* ---- notifications: who gets one, and what it says ---- */
+{
+  const { pushState, needsReminder, needsLateNudge, streakEndingYesterday,
+          nudgeText, STREAK_WORTH_SAVING } = await import("../js/push.js");
+
+  /* The order of the checks is the design, so the tests walk it in order. */
+  const base = { hasKey: true, supported: true, permission: "default",
+                 subscribed: false, standalone: false, platform: "other", iosSafari: true };
+  check("no VAPID key hides the row", pushState({ ...base, hasKey: false }), "no-key");
+  check("iPhone in Safari, not installed, is told to install",
+        pushState({ ...base, platform: "ios" }), "needs-install");
+  check("iPhone in Chrome is told the browser is wrong",
+        pushState({ ...base, platform: "ios", iosSafari: false }), "wrong-browser");
+  check("installed iPhone gets the ordinary offer",
+        pushState({ ...base, platform: "ios", standalone: true }), "off");
+  check("no push support hides the row",
+        pushState({ ...base, supported: false }), "unsupported");
+  check("a refusal is permanent, and says so",
+        pushState({ ...base, permission: "denied" }), "blocked");
+  check("subscribed shows as on", pushState({ ...base, subscribed: true }), "on");
+  /* The iOS check must come BEFORE the support check: an iPhone that has not
+     been installed reports push support and would otherwise be offered a
+     button that silently cannot work. */
+  check("iOS install beats a missing-support report",
+        pushState({ ...base, platform: "ios", supported: false }), "needs-install");
+
+  const people = [
+    { id: "a", name: "Ana",  role: "participant", notify: true },
+    { id: "b", name: "Bo",   role: "participant", notify: true },
+    { id: "c", name: "Cass", role: "participant", notify: false },
+    { id: "v", name: "Vi",   role: "viewer",      notify: true },
+  ];
+  check("nobody who has posted is nudged",
+        needsReminder(people, ["a"]).map(p => p.id), ["b"]);
+  check("viewers are never nudged — they have nothing to log",
+        needsReminder(people, []).some(p => p.role === "viewer"), false);
+  check("opting out is honoured",
+        needsReminder(people, []).some(p => p.id === "c"), false);
+
+  /* The late nudge is the narrow one: a streak worth losing, or nothing. */
+  check("late nudge only where there is a streak to save",
+        needsLateNudge(people, [], { a: 9, b: 1 }).map(p => p.id), ["a"]);
+  check("a two-day run is not yet a streak",
+        needsLateNudge(people, [], { a: STREAK_WORTH_SAVING - 1 }).length, 0);
+  check("someone who already posted gets no late nudge either",
+        needsLateNudge(people, ["a"], { a: 30 }).length, 0);
+
+  /* Counting back from yesterday, never including today: this is called to
+     decide whether today's gap breaks something. */
+  check("streak counts back from yesterday",
+        streakEndingYesterday(["2026-11-08", "2026-11-09", "2026-11-10"], "2026-11-11"), 3);
+  check("today does not count towards it",
+        streakEndingYesterday(["2026-11-11"], "2026-11-11"), 0);
+  check("a gap ends the streak",
+        streakEndingYesterday(["2026-11-05", "2026-11-09", "2026-11-10"], "2026-11-11"), 2);
+  check("no history is no streak", streakEndingYesterday([], "2026-11-11"), 0);
+  /* Month and year boundaries are where naive date arithmetic breaks. */
+  check("a streak crosses the end of a month",
+        streakEndingYesterday(["2026-10-30", "2026-10-31", "2026-11-01"], "2026-11-02"), 3);
+
+  const mo = { photoIsTheLog: true };
+  check("the late nudge leads with the number it is about",
+        nudgeText("late", mo, { streak: 11 }).title, "11 days — don't stop now");
+  check("the reminder names who is already up",
+        nudgeText("reminder", mo, { movers: ["Ana", "Bo", "Cass"] }).title,
+        "Ana and Bo have posted.");
+  check("with nobody up yet it still says something",
+        nudgeText("reminder", mo, { movers: [] }).title, "Still time");
+  check("the wording follows the challenge",
+        nudgeText("reminder", { photoIsTheLog: false }, { movers: [] }).body,
+        "Your turn — post today.");
+}
+
+/* ---- the service worker must never cache ----
+   A fetch handler in sw.js would serve a stale index.html, the new build id in
+   board.build would never arrive, and the app's own update check would reload
+   into the same old page — a phone stuck on a week-old version that refreshing
+   cannot fix. The file says so at the top; this makes it true. */
+{
+  const sw = readFileSync(new URL("../sw.js", import.meta.url), "utf8");
+  check("sw.js has no fetch handler", /addEventListener\(\s*["']fetch["']/.test(sw), false);
+  check("sw.js opens no cache", /caches\.open|cache\.put/.test(sw), false);
+}
+
 /* ---- schema.sql must survive init-db.mjs splitting it on ';' ----
    init-db.mjs splits the file on semicolons and runs each piece. A semicolon
    inside a `--` comment therefore cuts a statement in half, and the second

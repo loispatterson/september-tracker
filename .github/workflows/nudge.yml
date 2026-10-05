@@ -1,0 +1,62 @@
+# The evening nudges.
+#
+# This runs here rather than on Vercel for two reasons: Hobby allows twelve
+# serverless functions and api/ holds exactly twelve, so a sender there would
+# break the deploy; and Hobby cron fires once a day with no control over when.
+#
+# GitHub's scheduler is best-effort and runs late under load — commonly five to
+# twenty minutes, occasionally more. That is fine for "post your photo" and
+# would not be for anything time-critical. The times below are UTC, so they
+# shift by an hour relative to Paris when the clocks change; the hour each
+# nudge lands is approximate by design rather than by accident.
+name: nudge
+
+on:
+  schedule:
+    # 18:30 UTC — 19:30 in Paris through November. Early enough to act on.
+    - cron: "30 18 * * *"
+    # 21:45 UTC — late, and only ever to someone with a streak to lose.
+    - cron: "45 21 * * *"
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: "which send"
+        required: true
+        default: reminder
+        type: choice
+        options: [reminder, late]
+      dry:
+        description: "print instead of sending"
+        type: boolean
+        default: true
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: movember
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      - name: Send
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
+          CHALLENGE: movember
+        run: |
+          # Which send: the late one for the 21:45 schedule, otherwise the
+          # reminder. A manual run says so itself.
+          if [ -n "${{ inputs.kind }}" ]; then
+            KIND="${{ inputs.kind }}"
+            [ "${{ inputs.dry }}" = "true" ] && DRY="--dry"
+          elif [ "${{ github.event.schedule }}" = "45 21 * * *" ]; then
+            KIND=late
+          else
+            KIND=reminder
+          fi
+          node scripts/send-push.mjs "$KIND" $DRY

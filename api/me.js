@@ -69,12 +69,61 @@ async function summaryFor(userId) {
   return { months: rows, totals: { ...totals, ...social, topActivities: foldActivityCounts(top).slice(0, 3) } };
 }
 
-/* GET /api/me            → your own fitness profile.
-   GET /api/me?view=summary → your month-by-month history.
+/* One browser's agreement to be notified.
+
+   Stored by endpoint rather than by user, because the endpoint is what the
+   push service issues and what identifies the subscription — the same person
+   on a phone and a laptop is two rows, and both should ring.
+
+   An endpoint can also move between accounts: a shared tablet, or someone who
+   switched user on the same browser. ON CONFLICT therefore reassigns it rather
+   than failing, so the notification follows the person actually logged in. */
+async function savePush(req, res, userId) {
+  const sub = (req.body || {}).subscription;
+  const endpointUrl = sub && typeof sub.endpoint === "string" ? sub.endpoint : "";
+  const keys = (sub && sub.keys) || {};
+
+  /* Unsubscribing sends the endpoint with no keys. Deleting the row is the
+     whole of it — there is no "muted" state, because a subscription we keep
+     but never send to is a thing that silently comes back to life later. */
+  if (req.body && req.body.remove) {
+    if (endpointUrl) await sql`DELETE FROM push_subscriptions WHERE endpoint = ${endpointUrl}`;
+    await sql`UPDATE users SET notify = false WHERE id = ${userId}`;
+    return res.status(200).json({ ok: true, subscribed: false });
+  }
+
+  if (!endpointUrl || !keys.p256dh || !keys.auth) {
+    return res.status(400).json({ error: "bad subscription" });
+  }
+  /* A push endpoint is a URL on the browser vendor's own service. Length is
+     the only thing worth checking: the value is never rendered, only posted
+     back to the service that issued it. */
+  if (endpointUrl.length > 1000) return res.status(400).json({ error: "bad subscription" });
+
+  await sql`
+    INSERT INTO push_subscriptions (endpoint, user_id, p256dh, auth)
+    VALUES (${endpointUrl}, ${userId}, ${String(keys.p256dh)}, ${String(keys.auth)})
+    ON CONFLICT (endpoint) DO UPDATE
+      SET user_id = excluded.user_id, p256dh = excluded.p256dh,
+          auth = excluded.auth, failures = 0, last_ok_at = NULL`;
+  await sql`UPDATE users SET notify = true WHERE id = ${userId}`;
+  return res.status(200).json({ ok: true, subscribed: true });
+}
+
+/* GET  /api/me             → your own fitness profile.
+   GET  /api/me?view=summary → your month-by-month history.
+   POST /api/me?view=push    → add or remove this browser's subscription.
 
    Separate from /api/board because this is the private half: age band, goals,
-   fitness level and free-text note are only ever returned to their owner. */
+   fitness level and free-text note are only ever returned to their owner.
+
+   The POST is multiplexed onto this file rather than given api/push.js for the
+   same reason the summary is here — Vercel Hobby allows twelve functions and
+   api/ holds exactly twelve. */
 export default endpoint(async (req, res, userId) => {
+  if (req.method === "POST" && req.query.view === "push") {
+    return savePush(req, res, userId);
+  }
   if (req.method !== "GET") return res.status(405).json({ error: "method" });
 
   /* Four queries, so it is only run when the Progress tab is opened — never

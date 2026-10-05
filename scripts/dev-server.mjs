@@ -342,6 +342,42 @@ async function apiRoute(req, res, path, q) {
     });
   }
 
+  /* POST /api/me?view=push — mirrored from api/me.js. The README makes this
+     mandatory: a route that exists in production and not here is a bug nobody
+     finds until it is deployed.
+
+     Local pushes are never actually sent — there is no VAPID key and no push
+     service — so this stores the row and nothing more. That is enough to
+     exercise the client's on/off cycle, which is the half that has UI. */
+  if (path === "/api/me" && req.method === "POST" && q.get("view") === "push") {
+    if (!userId) return needAuth();
+    const payload = await body(req);
+    d.pushSubscriptions = d.pushSubscriptions || [];
+    const sub = payload.subscription || {};
+
+    if (payload.remove) {
+      d.pushSubscriptions = d.pushSubscriptions.filter(x => x.endpoint !== sub.endpoint);
+      const u = d.users.find(x => x.id === userId);
+      if (u) u.notify = false;
+      await put(d);
+      return send(res, 200, { ok: true, subscribed: false });
+    }
+
+    const keys = sub.keys || {};
+    if (!sub.endpoint || !keys.p256dh || !keys.auth) {
+      return send(res, 400, { error: "bad subscription" });
+    }
+    d.pushSubscriptions = d.pushSubscriptions.filter(x => x.endpoint !== sub.endpoint);
+    d.pushSubscriptions.push({
+      endpoint: sub.endpoint, user_id: userId,
+      p256dh: keys.p256dh, auth: keys.auth, failures: 0,
+    });
+    const u = d.users.find(x => x.id === userId);
+    if (u) u.notify = true;
+    await put(d);
+    return send(res, 200, { ok: true, subscribed: true });
+  }
+
   if (path === "/api/me" && req.method === "GET") {
     if (!userId) return needAuth();
     const u = d.users.find(x => x.id === userId);

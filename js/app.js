@@ -8,6 +8,9 @@ import { funPromptFor } from "./fun.js";
 import { AGE_BANDS, GOALS, FITNESS, FEELINGS, isLegacyBand } from "./profile.js";
 import { challengeConfig } from "./challenge.js";
 import { detect, installState, PLATFORM } from "./install.js";
+import { pushState } from "./push.js";
+import { pushSupported, permission, currentSubscription, subscribe, unsubscribe, serialise,
+         registerWorker } from "./pushclient.js";
 import { avatarHtml, avatarName, avatarChoices, defaultAvatar,
          COLOURS, colourFor, withColour, splitAvatar } from "./avatars.js";
 import { participants, viewers, isViewer, activeUsers, orderedActivities, buildLogs,
@@ -52,6 +55,11 @@ const ui = {
      cfg is not known at module load, because the board has not answered yet. */
   draft: { name: "", emoji: "", ageBand: "", goals: [], fitness: "", note: "", pin: "" },
   changingPin: false,
+  /* Whether THIS browser holds a push subscription. Not read from the user
+     row: notify says the person wants reminders, this says this particular
+     device can receive them, and a phone and a laptop disagree all the time. */
+  pushOn: false,
+  pushBusy: false,
   showSuggestions: false,
   funSwap: 0,
   funOwn: false,
@@ -1047,12 +1055,61 @@ function cellPanel(u, ds, today) {
 }
 
 /* ---------- profile ---------- */
+/* Notifications.
+
+   Deliberately below the install card, because on an iPhone the order is the
+   instruction: there is no point offering notifications to someone who has not
+   added the app to their Home Screen, since iOS will not deliver them. The
+   row hides itself in that case rather than appearing greyed out.
+
+   ui.pushBusy exists because requestPermission can sit open for as long as the
+   person takes to read it, and a second tap meanwhile would ask twice. */
+function renderPushCard() {
+  const state = pushState({
+    hasKey: !!board.vapidPublicKey,
+    supported: pushSupported(),
+    permission: permission(),
+    subscribed: ui.pushOn,
+    ...detect(),
+  });
+
+  if (state === "no-key" || state === "unsupported"
+      || state === "needs-install" || state === "wrong-browser") return "";
+
+  if (state === "blocked") {
+    return `<div class="card">
+      <h2>🔔 Reminders</h2>
+      <p class="small muted">Notifications are turned off for this site. The
+        browser won't ask again — it has to be changed in its settings for
+        this page.</p>
+    </div>`;
+  }
+
+  if (state === "on") {
+    return `<div class="card">
+      <h2>🔔 Reminders</h2>
+      <p class="small muted">On for this device. An evening nudge if you
+        haven't posted — never more than one.</p>
+      <button class="btn ghost" data-action="push-off" ${ui.pushBusy ? "disabled" : ""}>Turn off</button>
+    </div>`;
+  }
+
+  return `<div class="card">
+    <h2>🔔 Reminders</h2>
+    <p class="small muted">One nudge in the evening if you haven't posted
+      yet. Nothing on the days you have.</p>
+    <button class="btn primary" data-action="push-on" ${ui.pushBusy ? "disabled" : ""}>${
+      ui.pushBusy ? "Just a moment…" : "Turn on reminders"}</button>
+  </div>`;
+}
+
 function renderProfile() {
   const p = myProfile();
   if (!p) return "";
   const ideas = board.funIdeas || [];
   return `
     ${renderInstallCard()}
+    ${renderPushCard()}
     <div class="card">
       <h2>Your profile</h2>
       <div class="field">
@@ -1882,6 +1939,43 @@ async function onClick(ev) {
     return;
   }
 
+  if (a === "push-on") {
+    ui.pushBusy = true; render();
+    /* The permission sheet can sit open for a minute. Everything below runs
+       after they answer, and every failure path is the same: leave the button
+       as it was and say nothing. They were asked, they declined or it did not
+       work, and an error toast about a thing they just refused is noise. */
+    const sub = await subscribe(board.vapidPublicKey);
+    ui.pushBusy = false;
+    if (!sub) { render(); return; }
+    try {
+      await api.savePush(serialise(sub));
+      ui.pushOn = true;
+      toast("Reminders on");
+    } catch (e) {
+      /* The browser now holds a subscription the server has never heard of,
+         which would be a silent dead end. Undo it so the button still says
+         "turn on" and a second tap can work. */
+      try { await sub.unsubscribe(); } catch { /* nothing more to try */ }
+      if (isAuthError(e)) return signedOut();
+      toast(errorMessage(e));
+    }
+    render();
+    return;
+  }
+
+  if (a === "push-off") {
+    ui.pushBusy = true; render();
+    const endpoint = await unsubscribe();
+    ui.pushOn = false;
+    ui.pushBusy = false;
+    try { if (endpoint) await api.dropPush(endpoint); }
+    catch (e) { if (isAuthError(e)) return signedOut(); }
+    toast("Reminders off");
+    render();
+    return;
+  }
+
   if (a === "save-fundraising") {
     const el = document.getElementById("fundraising-edit");
     const url = el ? (el.value || "").trim() : "";
@@ -2094,6 +2188,25 @@ async function boot() {
   await refresh();
   if (me && getUser(me.id)) { await loadMyProfile(); loadSuggestions(); }
   render();
+
+  /* Notifications, after the first paint and never blocking it.
+
+     The worker is registered for everyone with push support, not only for
+     people who have agreed: iOS will not even let the page ask until a worker
+     is in place, and registering one does nothing visible on its own.
+
+     ui.pushOn comes from the browser rather than the user row, because the
+     question the button answers is "will THIS device ring", and a phone and a
+     laptop give different answers. A subscription can also disappear without
+     anyone touching it — iOS drops them when an app is unused for weeks — so
+     reading it at boot is the only way the button stays honest. */
+  if (pushSupported()) {
+    registerWorker().then(async () => {
+      const sub = await currentSubscription();
+      if (sub) ui.pushOn = true;
+      renderUnlessTyping();
+    });
+  }
 
   /* cheap multiplayer: refetch when the tab regains focus and every 60s.
      Both paths redraw through renderUnlessTyping, so a background update can
