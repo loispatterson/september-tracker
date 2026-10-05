@@ -35,6 +35,28 @@ vercel --prod                       # → your shareable URL
 
 Then send friends the URL (and passcode). On a phone, **Share → Add to Home Screen** makes it feel like an app.
 
+## Running the pilot
+
+Three scripts carry the measurement. None of what they record can be
+reconstructed afterwards, so they matter from day one rather than in December.
+
+```sh
+npm run totals                      # lists the fundraising pages to read
+npm run totals lois=120 ahmed=45.5  # writes today's figures
+npm run report                      # the four questions, with their caveats
+npm run report 2026-11              # a specific month
+npm run forget <name>               # removes someone completely
+```
+
+`totals` is deliberately manual. A scraper against someone else's fundraising
+site breaks the week they change their markup, fails quietly, and the readings
+are gone for good — those pages only ever show today's total. Twice a week, by
+hand, buys a series that is certainly right.
+
+`forget` is the answer to "take me off it". The board is a public URL with real
+names and faces on it, so that request has to have an answer on the evening
+somebody makes it.
+
 ## Tests
 
 ```bash
