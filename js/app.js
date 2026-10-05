@@ -1308,16 +1308,10 @@ function render() {
   const titleEl = document.getElementById("apptitle");
   if (titleEl) titleEl.textContent = appTitle();
   document.title = appTitle();
-  /* The install metadata is in the HTML, which is shared between challenges,
-     so point it at the right one once the board has told us which this is.
-     iOS reads these from the live DOM at the moment someone taps Add to Home
-     Screen, so updating them here is enough. */
-  const man = document.getElementById("manifest");
-  if (man) man.href = `/manifest-${cfg.id}.json`;
-  const iosIcon = document.getElementById("ios-icon");
-  if (iosIcon) iosIcon.href = `/icons/${cfg.id}/apple-touch-icon.png`;
-  const iosTitle = document.getElementById("ios-title");
-  if (iosTitle) iosTitle.content = cfg.appName;
+  /* The manifest link, the apple-touch-icon and the Home Screen title are NOT
+     set here. iOS reads them from the HTML as served, before any script runs,
+     so correcting them at runtime was too late and the install sheet offered
+     the wrong name. scripts/stamp-html.mjs writes them at build time instead. */
 
   /* Demo: the splash replaces the bare "Loading…" and stays until the visitor
      picks a door. isDemo is only known once the board answers, so a first

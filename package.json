@@ -8,7 +8,10 @@
     "dev": "vercel dev",
     "dev:local": "node scripts/dev-server.mjs",
     "db:init": "node scripts/init-db.mjs",
-    "test": "node scripts/run-tests.mjs"
+    "test": "node scripts/run-tests.mjs",
+    "stamp": "node scripts/stamp-html.mjs",
+    "icons": "node scripts/icons.mjs",
+    "vercel-build": "node scripts/stamp-html.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.122.0",

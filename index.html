@@ -3,19 +3,24 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#2a78d6">
+<meta name="theme-color" content="#1b1a18">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <!-- iOS ignores the manifest for the Home Screen name and icon, so both are
      repeated here. Without them it installs as a screenshot of the page with
-     the URL underneath, and an uninstalled page cannot receive web push. -->
-<meta name="apple-mobile-web-app-title" id="ios-title" content="Tracker">
-<link rel="apple-touch-icon" id="ios-icon" href="/icons/wellbeing/apple-touch-icon.png">
-<link rel="manifest" id="manifest" href="/manifest-wellbeing.json">
-<title>Monthly Tracker</title>
+     the URL underneath, and an uninstalled page cannot receive web push.
+
+     These values, the title and the theme colour are written at build time by
+     scripts/stamp-html.mjs, because iOS reads them from the HTML as served and
+     correcting them from JavaScript afterwards is too late. What is in the
+     file is the wellbeing default. -->
+<meta name="apple-mobile-web-app-title" id="ios-title" content="Cairn">
+<link rel="apple-touch-icon" id="ios-icon" href="/icons/movember/apple-touch-icon.png">
+<link rel="manifest" id="manifest" href="/manifest-movember.json">
+<title>Cairn</title>
 <link rel="stylesheet" href="/css/style.css">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💪</text></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='16 5.5 16 17'><path d='M17.5 19h13c1.2 0 1.2 2.4 0 2.4h-13c-1.2 0-1.2-2.4 0-2.4zM19.5 14.8h9c1.2 0 1.2 2.4 0 2.4h-9c-1.2 0-1.2-2.4 0-2.4zM21 10.8h6c1.2 0 1.2 2.4 0 2.4h-6c-1.2 0-1.2-2.4 0-2.4zM22.5 7.2h3c1.1 0 1.1 2.2 0 2.2h-3c-1.1 0-1.1-2.2 0-2.2z' fill='%23f2ede1'/></svg>">
 </head>
 <body>
 
