@@ -28,18 +28,23 @@ export default endpoint(async (req, res) => {
 
     if (!cleanName) return bad(res, "name required");
     if (!validPin(pin)) return bad(res, "PIN must be 4 digits");
-    if (!isViewer) {
+    /* These three only exist to tune workout suggestions, so they are required
+       exactly where there are workouts. Gating on isViewer alone was a blocker:
+       Cairn's onboarding does not ask for them — it has no exercise card — so
+       every participant signup was rejected with "bad ageBand". */
+    if (!isViewer && cfg.hasExercise) {
       if (!validAgeBand(ageBand)) return bad(res, "bad ageBand");
       if (!goals.length) return bad(res, "pick at least one goal");
       if (!FITNESS.includes(fitness)) return bad(res, "bad fitness level");
     }
 
-    /* age_band and goal are NOT NULL from the original schema, so a viewer
-       still needs a value in them. These are never read for a viewer — nothing
-       suggests a workout to someone who does not log one. */
-    const band = isViewer ? "30-44" : ageBand;
-    const goalList = isViewer ? ["general"] : goals;
-    const fit = isViewer ? "occasional" : fitness;
+    /* age_band and goal are NOT NULL from the original schema, so a row still
+       needs a value in them even when nothing will ever read it — a viewer, or
+       anyone on a challenge with no exercise at all. */
+    const unused = isViewer || !cfg.hasExercise;
+    const band = unused ? "30-44" : ageBand;
+    const goalList = unused ? ["general"] : goals;
+    const fit = unused ? "occasional" : fitness;
 
     const id = "u_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     try {

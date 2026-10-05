@@ -8,7 +8,7 @@ const { validEntryDate } = await import("../api/_lib/month.js");
 const { challengeFromEnv } = await import("../api/_lib/challenge.js");
 const { whichDb } = await import("../api/_lib/which-db.mjs");
 const { cleanFundraisingUrl, parseAmount } = await import("../api/_lib/fundraising.js");
-const { readdirSync } = await import("node:fs");
+const { readdirSync, readFileSync } = await import("node:fs");
 
 let { pass, fail } = runSelfTests();
 const check = (label, got, want) => {
@@ -167,6 +167,28 @@ check("three decimals are refused", parseAmount("12.345"), null);
   const fns = readdirSync(new URL("../api/", import.meta.url))
     .filter(f => f.endsWith(".js") && !f.startsWith("_"));
   check(`api/ has ${fns.length} functions, Vercel Hobby allows 12`, fns.length <= 12, true);
+}
+
+/* ---- schema.sql must survive init-db.mjs splitting it on ';' ----
+   init-db.mjs splits the file on semicolons and runs each piece. A semicolon
+   inside a `--` comment therefore cuts a statement in half, and the second
+   half — now missing its `--` — is parsed as SQL. It fails with a syntax error
+   pointing at an English word, which gives no clue what happened.
+
+   This was a real bug, written twice. Three comments in schema.sql used a
+   semicolon as punctuation and `npm run db:init` would have died on the first
+   of them. Rewriting the prose is the fix; this is the guard. */
+{
+  const sql = readFileSync(new URL("../scripts/schema.sql", import.meta.url), "utf8");
+  const offenders = sql.split("\n")
+    .map((line, i) => [i + 1, line])
+    .filter(([, line]) => /^\s*--/.test(line) && line.includes(";"));
+  if (offenders.length) {
+    for (const [n, line] of offenders) {
+      console.error(`  schema.sql:${n} has a ';' in a comment — ${line.trim().slice(0, 60)}`);
+    }
+  }
+  check("no semicolons inside schema.sql comments", offenders.length, 0);
 }
 
 /* The server reads the challenge from the environment; the absence of the

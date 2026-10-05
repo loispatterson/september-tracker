@@ -1068,6 +1068,12 @@ function renderProfile() {
       </div>
       <p class="small muted">Everything below is private to you. Other people
         only ever see your name and avatar.</p>
+      ${/* Age, fitness, goals and the free-text note exist only to tune
+            workout suggestions. On a challenge with no workouts they are four
+            settings that change nothing, so they are not shown at all — and
+            the fun-ideas pool below goes with them, since Cairn deals the same
+            thing to everyone every day. */
+        cfg.hasExercise ? `
       <div class="field">
         <label>Age band</label>
         ${isLegacyBand(p.ageBand) ? `<p class="small muted">Your band was set before
@@ -1091,9 +1097,12 @@ function renderProfile() {
                placeholder="e.g. dodgy knee, no gym" autocomplete="off">
         <div class="actions">
           <button class="btn" data-action="save-note">Save</button>
-        </div>
+        </div>` : ""}
       </div>
     </div>
+    ${/* The idea pool feeds the daily fun prompt. Cairn deals everyone the
+          same thing every day — grow it — so there is nothing to pool. */
+      cfg.hasFun && !cfg.photoIsTheLog ? `
     <div class="card">
       <h2>Shared fun ideas</h2>
       <div class="field">
@@ -1103,7 +1112,19 @@ function renderProfile() {
       ${ideas.length ? `<ul class="pool">${ideas.map(i =>
         `<li>${esc(i.text)} <span class="muted small">— ${esc((getUser(i.added_by) || {}).name || "someone")}</span></li>`).join("")}</ul>`
         : `<p class="small muted">30 built-in ideas are in rotation. Add your own here.</p>`}
-    </div>
+    </div>` : ""}
+    ${cfg.fundraising && !isViewer(getUser(me.id) || {}) ? `
+    <div class="card">
+      <h2>💷 Fundraising</h2>
+      <div class="field">
+        <label>Your page <span class="muted">(Movember or JustGiving)</span></label>
+        <input type="text" id="fundraising-edit" value="${esc((getUser(me.id) || {}).fundraising_url || "")}"
+               placeholder="uk.movember.com/mospace/..." autocomplete="off" inputmode="url">
+        <div class="actions"><button class="btn" data-action="save-fundraising">Save</button></div>
+        <p class="small muted">This is the link sponsors tap. Nobody can give
+          without it.</p>
+      </div>
+    </div>` : ""}
     <div class="card">
       <h2>Security</h2>
       ${ui.changingPin ? `
@@ -1858,6 +1879,21 @@ async function onClick(ev) {
   if (a === "backfill") {
     const done = el.dataset.done === "1";
     await saveEntry({ date: el.dataset.date, kind: el.dataset.kind, done: done ? true : null });
+    return;
+  }
+
+  if (a === "save-fundraising") {
+    const el = document.getElementById("fundraising-edit");
+    const url = el ? (el.value || "").trim() : "";
+    try {
+      await api.updateUser({ fundraisingUrl: url });
+      await refresh();
+      toast(url ? "Saved" : "Removed");
+    } catch (e) {
+      if (isAuthError(e)) return signedOut();
+      toast(errorMessage(e));
+    }
+    render();
     return;
   }
 

@@ -11,7 +11,10 @@
     "test": "node scripts/run-tests.mjs",
     "stamp": "node scripts/stamp-html.mjs",
     "icons": "node scripts/icons.mjs",
-    "vercel-build": "node scripts/stamp-html.mjs"
+    "vercel-build": "node scripts/stamp-html.mjs",
+    "totals": "node scripts/record-totals.mjs",
+    "report": "node scripts/pilot-report.mjs",
+    "forget": "node scripts/delete-user.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.122.0",

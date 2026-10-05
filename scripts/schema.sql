@@ -122,7 +122,7 @@ CREATE INDEX IF NOT EXISTS entry_comments_target
 --     UPDATE entries SET kind = 'mo' WHERE kind = 'fun'
 -- ===========================================================================
 
--- Who this account is for. 'participant' grows a moustache and logs days;
+-- Who this account is for. 'participant' grows a moustache and logs days.
 -- 'viewer' is a sponsor or friend who watches, comments and chips in, and
 -- never logs anything. Default 'participant' so every account that existed
 -- before viewers did keeps working untouched.
@@ -143,7 +143,7 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS cheering text;
 -- One row per person per day they opened the app.
 --
 -- This is the retention measurement. "Days posted" says whether someone kept
--- up the habit; this says whether they kept opening the thing, which is the
+-- up the habit. This says whether they kept opening the thing, which is the
 -- separate question and the one that says whether the app is doing any work.
 -- Written from /api/board, once per person per day, ON CONFLICT DO NOTHING, so
 -- the 60-second poll costs one insert a day rather than 1440.
@@ -173,7 +173,7 @@ CREATE TABLE IF NOT EXISTS fundraising_snapshots (
 
 -- One row per browser that has agreed to notifications. The endpoint is the
 -- primary key because that is what the push service issues and what identifies
--- the subscription; the same person on a phone and a laptop is two rows.
+-- the subscription, so the same person on a phone and a laptop is two rows.
 -- failures counts consecutive rejections so a dead subscription gets pruned
 -- rather than retried every evening for a month.
 CREATE TABLE IF NOT EXISTS push_subscriptions (
