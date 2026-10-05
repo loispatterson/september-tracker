@@ -39,6 +39,10 @@ const favicon = cfg.hasExercise
   : `data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='16 5.5 16 17'><path d='${MOUSTACHES.cairn.d}' fill='%23f2ede1'/></svg>`;
 
 const swaps = [
+  /* The challenge, readable from the first byte. Without it the client has to
+     guess until /api/board answers, and a wrong guess means the header and the
+     browser tab say the wrong name for a second on every load. */
+  [/<html lang="en"[^>]*>/, `<html lang="en" data-challenge="${cfg.id}">`],
   [/<title>[^<]*<\/title>/, `<title>${title}</title>`],
   [/(<meta name="theme-color" content=")[^"]*(")/, `$1${ground}$2`],
   [/(<meta name="apple-mobile-web-app-title" id="ios-title" content=")[^"]*(")/,

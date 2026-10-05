@@ -24,12 +24,14 @@ let board = { users: [], entries: [], funIdeas: [] };
 
 /* Which challenge this deployment runs.
 
-   Cached in localStorage because the first paint happens before /api/board
-   answers: without it, launching from a home-screen icon flashes the wrong
-   name and strapline for a second, which looks broken. refresh() corrects it
-   from the server, which is always the authority. */
+   Read from the <html> tag, which scripts/stamp-html.mjs writes at build time,
+   so it is correct on the very first paint. It used to come from localStorage,
+   which meant a first visit had nothing to go on, assumed the wellbeing board,
+   and showed the wrong name until /api/board answered. refresh() still takes
+   the server's answer as the authority. */
 const CHALLENGE_KEY = "tracker.challenge";
-let cfg = challengeConfig(localStorage.getItem(CHALLENGE_KEY));
+let cfg = challengeConfig(
+  document.documentElement.dataset.challenge || localStorage.getItem(CHALLENGE_KEY));
 let me = null;                    /* { id, name } from localStorage */
 let exLog = {}, funLog = {}, photoLog = {};   /* log[date][userId] = entry */
 let suggestions = [];
