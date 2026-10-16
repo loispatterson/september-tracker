@@ -6,6 +6,7 @@ const { validatePhoto, newPhotoId, b64Bytes, stripDataUrl, validPhotoDate, MAX_B
   await import("../api/_lib/photos.js");
 const { validEntryDate } = await import("../api/_lib/month.js");
 const { challengeFromEnv } = await import("../api/_lib/challenge.js");
+const { challengeConfig } = await import("../js/challenge.js");
 const { whichDb } = await import("../api/_lib/which-db.mjs");
 const { cleanFundraisingUrl, parseAmount } = await import("../api/_lib/fundraising.js");
 const { readdirSync, readFileSync } = await import("node:fs");
@@ -167,6 +168,35 @@ check("three decimals are refused", parseAmount("12.345"), null);
   const fns = readdirSync(new URL("../api/", import.meta.url))
     .filter(f => f.endsWith(".js") && !f.startsWith("_"));
   check(`api/ has ${fns.length} functions, Vercel Hobby allows 12`, fns.length <= 12, true);
+}
+
+/* ---- consent ----
+   The Movember board has no passcode: sponsors have to be able to look without
+   an account, so it is a public web page with people's names and faces on it.
+   Agreement to that has to be explicit, has to be recorded, and has to be
+   enforced by the server rather than by a checkbox anyone can bypass. */
+{
+  const wellbeing = challengeConfig("wellbeing");
+  const movember = challengeConfig("movember");
+
+  check("the friends' board does not ask", wellbeing.consent, null);
+  check("Cairn asks participants", typeof movember.consent.participant, "string");
+  check("Cairn asks viewers", typeof movember.consent.viewer, "string");
+
+  /* The two lines differ on purpose. A viewer never posts a photo, and telling
+     them their photos are public would be a false statement about their own
+     data — the opposite of informed. */
+  check("the two wordings are not the same",
+        movember.consent.participant === movember.consent.viewer, false);
+  check("only the participant line mentions photos",
+        [/photo/i.test(movember.consent.participant), /photo/i.test(movember.consent.viewer)],
+        [true, false]);
+  /* Both have to say the thing that matters, which is that it is public. */
+  for (const role of ["participant", "viewer"]) {
+    check(`the ${role} line says it is public`, /public/i.test(movember.consent[role]), true);
+    check(`the ${role} line says anyone with the link`,
+          /anyone with the link/i.test(movember.consent[role]), true);
+  }
 }
 
 /* ---- notifications: who gets one, and what it says ---- */

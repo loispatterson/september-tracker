@@ -186,3 +186,16 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
   failures   int NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS push_subscriptions_user ON push_subscriptions (user_id);
+
+-- When this person agreed that the board is public.
+--
+-- The board has no passcode on the Movember deployment: sponsors have to be
+-- able to look without an account, so names, faces and photos are visible to
+-- anyone with the link. That is a deliberate design decision and it is exactly
+-- why agreement has to be explicit rather than assumed from signing up.
+--
+-- Stored as a timestamp rather than a boolean so there is a record of when,
+-- which is what makes it evidence rather than a tick. Null for the accounts
+-- that existed before this column, and for the friends' board, where the
+-- question does not arise in the same way.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS consented_at timestamptz;

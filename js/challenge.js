@@ -33,6 +33,10 @@ export const CHALLENGES = {
     fundraising: false,
     roles: ["participant"],
     promptPool: null,              /* null = the stock fun-prompt deck */
+    /* null = do not ask. The friends' board sits behind a passcode and the
+       five people on it set it up together, so a consent gate would be
+       theatre. Cairn is a public URL and the question is real. */
+    consent: null,
     /* Which tabs exist. Progress is built around exercise minutes and
        distance, so it has nothing to say where there is no exercise. */
     tabs: ["today", "board", "gallery", "progress", "profile"],
@@ -59,6 +63,14 @@ export const CHALLENGES = {
     fundraising: true,
     roles: ["participant", "viewer"],
     promptPool: null,
+    /* Shown at signup, and must be ticked before an account can be created.
+       Worded for what actually happens rather than in the abstract: the board
+       has no passcode, so this is a public web page with people's faces on
+       it, and that is the thing being agreed to. */
+    consent: {
+      participant: "I understand this board is a public web page. My name, my avatar and the photos I post can be seen by anyone with the link.",
+      viewer: "I understand this board is a public web page. My name and anything I write can be seen by anyone with the link.",
+    },
     tabs: ["today", "board", "gallery", "profile"],
     /* The other challenge this engine runs. Separate origin, so this cannot be
        a link into a working account — it is an interest probe. */

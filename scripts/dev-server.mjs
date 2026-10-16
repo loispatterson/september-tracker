@@ -196,9 +196,18 @@ async function apiRoute(req, res, path, q) {
     const fundraisingUrl = cfg.fundraising && !isViewer
       ? cleanFundraisingUrl(payload.fundraisingUrl) : "";
 
+    /* mirrors api/users.js: consent is checked on the server, not taken on
+       trust from the checkbox */
+    const needsConsent = !!cfg.consent;
+    if (needsConsent && payload.consented !== true) {
+      return send(res, 400, { error: "consent required" });
+    }
+
     if (!cleanName) return send(res, 400, { error: "name required" });
     if (!validPin(pin)) return send(res, 400, { error: "PIN must be 4 digits" });
-    if (!isViewer) {
+    /* mirrors api/users.js: the fitness questions are required only where
+       there are workouts to tune */
+    if (!isViewer && cfg.hasExercise) {
       if (!validAgeBand(ageBand)) return send(res, 400, { error: "bad ageBand" });
       if (!goals.length) return send(res, 400, { error: "pick at least one goal" });
       if (!FITNESS.includes(fitness)) return send(res, 400, { error: "bad fitness level" });
@@ -217,7 +226,8 @@ async function apiRoute(req, res, path, q) {
                    fitness: fit, note: isViewer ? null : cleanNote(note), joined,
                    role, fundraising_url: fundraisingUrl || null,
                    cheering: cheering ? String(cheering).slice(0, 40) : null,
-                   pin_hash: hashPin(pin), pin_fails: 0, pin_locked_until: null });
+                   pin_hash: hashPin(pin), pin_fails: 0, pin_locked_until: null,
+                   consented_at: needsConsent ? new Date().toISOString() : null });
     const t = newToken();
     d.sessions[t] = id;
     await put(d);

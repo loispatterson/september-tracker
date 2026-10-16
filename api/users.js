@@ -26,6 +26,13 @@ export default endpoint(async (req, res) => {
     const fundraisingUrl = cfg.fundraising && !isViewer
       ? cleanFundraisingUrl((req.body || {}).fundraisingUrl) : "";
 
+    /* Consent is checked server-side too. The checkbox can be bypassed by
+       anyone willing to open the console, and "they ticked a box" is only
+       evidence if the server is the thing that recorded it. */
+    const needsConsent = !!cfg.consent;
+    const consented = (req.body || {}).consented === true;
+    if (needsConsent && !consented) return bad(res, "consent required");
+
     if (!cleanName) return bad(res, "name required");
     if (!validPin(pin)) return bad(res, "PIN must be 4 digits");
     /* These three only exist to tune workout suggestions, so they are required
@@ -49,12 +56,14 @@ export default endpoint(async (req, res) => {
     const id = "u_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     try {
       await sql`INSERT INTO users (id, name, emoji, age_band, goal, goals, fitness, note,
-                                   pin_hash, role, fundraising_url, cheering)
+                                   pin_hash, role, fundraising_url, cheering,
+                                   consented_at)
                 VALUES (${id}, ${cleanName}, ${String(emoji || defaultAvatar(cfg)).slice(0, 24)},
                         ${band}, ${goalList[0]}, ${goalList.join(",")}, ${fit},
                         ${isViewer ? null : cleanNote(note)}, ${hashPin(pin)},
                         ${role}, ${fundraisingUrl || null},
-                        ${cheering ? String(cheering).slice(0, 40) : null})`;
+                        ${cheering ? String(cheering).slice(0, 40) : null},
+                        ${needsConsent ? new Date().toISOString() : null})`;
     } catch (e) {
       if (String(e).includes("users_name_key")) return res.status(409).json({ error: "name taken" });
       throw e;

@@ -53,7 +53,7 @@ const ui = {
   claiming: null,                 /* user being claimed, awaiting their PIN */
   /* emoji starts empty and is filled from the challenge on first render:
      cfg is not known at module load, because the board has not answered yet. */
-  draft: { name: "", emoji: "", ageBand: "", goals: [], fitness: "", note: "", pin: "" },
+  draft: { name: "", emoji: "", ageBand: "", goals: [], fitness: "", note: "", pin: "", consented: false },
   changingPin: false,
   /* Whether THIS browser holds a push subscription. Not read from the user
      row: notify says the person wants reminders, this says this particular
@@ -270,6 +270,14 @@ function renderSplash() {
   </div>`;
 }
 
+/* The consent wording for the role being signed up, or "" where the challenge
+   does not ask. Read through the role so a viewer is not told their photos are
+   public when they never post any. */
+function consentLine() {
+  if (!cfg.consent) return "";
+  return cfg.consent[ui.draft.role === "viewer" ? "viewer" : "participant"] || "";
+}
+
 function renderOnboard() {
   if (ui.offline) {
     return `<div class="onboard">
@@ -342,7 +350,18 @@ function renderOnboard() {
         <input type="text" id="pin-input" inputmode="numeric" maxlength="4"
                value="${esc(d.pin || "")}" placeholder="••••" autocomplete="off">
       </div>
-      <button class="btn primary big" data-action="create-user">${cfg.hasExercise ? `Start ${monthName()}` : (ui.draft.role === "viewer" ? "Count me in" : "Start growing")}</button>
+      ${/* Consent sits directly above the button, not buried in a link, and
+            the button is disabled until it is ticked. The board is a public
+            web page with people's faces on it — that has to be agreed to
+            knowingly, not discovered afterwards. */
+        consentLine() ? `
+      <label class="consent">
+        <input type="checkbox" id="consent-input" ${ui.draft.consented ? "checked" : ""}
+               data-action="toggle-consent">
+        <span>${esc(consentLine())}</span>
+      </label>` : ""}
+      <button class="btn primary big" data-action="create-user" ${
+        consentLine() && !ui.draft.consented ? "disabled" : ""}>${cfg.hasExercise ? `Start ${monthName()}` : (ui.draft.role === "viewer" ? "Count me in" : "Start growing")}</button>
       <p><button class="btn ghost small" data-action="onboard-step" data-val="who">← back</button></p>
     </div>`;
   }
@@ -1002,7 +1021,12 @@ function renderBoard() {
       </div>
       <div class="grid30">${cells}</div>
       ${panel}
-    </div>`;
+    </div>
+    ${/* The standing reminder. Consent at signup is a moment; this is the
+          thing that keeps it true afterwards, for the person who agreed a
+          fortnight ago and has stopped thinking about it. */
+      cfg.consent ? `<p class="public-note">This board is a public web page.
+        Anyone with the link can see it.</p>` : ""}`;
   }).join("");
   return monthNav() + cards + hiddenNote + showingAllNote;
 }
@@ -1756,6 +1780,16 @@ async function onClick(ev) {
     return;
   }
 
+  if (a === "toggle-consent") {
+    /* Read from the element rather than flipping a flag: the click handler
+       fires after the browser has already changed the checkbox, so trusting
+       our own copy would invert it. */
+    const el = document.getElementById("consent-input");
+    ui.draft.consented = el ? el.checked : !ui.draft.consented;
+    render();
+    return;
+  }
+
   if (a === "create-user") {
     const d = ui.draft;
     const val = id => { const el = document.getElementById(id); return el ? (el.value || "").trim() : ""; };
@@ -1771,6 +1805,7 @@ async function onClick(ev) {
       if (!(d.goals || []).length) return toast("Pick at least one goal");
     }
     if (!/^\d{4}$/.test(d.pin)) return toast("Choose a 4-digit PIN");
+    if (consentLine() && !d.consented) return toast("Please tick the box to continue");
     try {
       const { id, token } = await api.createUser(d);
       setToken(token);

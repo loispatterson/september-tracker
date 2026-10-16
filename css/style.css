@@ -549,3 +549,28 @@ nav.tabs button.on { color: var(--accent); font-weight: 600; }
    follows with the phone in their hand, not a list of options. */
 .steps { margin: 6px 0 10px; padding-left: 22px; font-size: 14px; line-height: 1.6; }
 .steps li { margin-bottom: 4px; }
+
+/* The consent tick at signup. Deliberately not styled down: it is the one
+   thing on the screen that has to be read rather than skimmed past, so it
+   gets normal body colour rather than the muted grey used for hints. */
+.consent {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  text-align: left;
+  margin: 14px 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink-1);
+}
+.consent input { margin-top: 2px; flex: 0 0 auto; width: 18px; height: 18px; }
+.btn[disabled] { opacity: .45; pointer-events: none; }
+
+/* The standing reminder that the board is public, shown wherever other
+   people's faces are. Quiet, but never hidden. */
+.public-note {
+  font-size: 12px;
+  color: var(--ink-2);
+  text-align: center;
+  margin: 10px 0 0;
+}
