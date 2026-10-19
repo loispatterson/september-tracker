@@ -174,13 +174,27 @@ const now = new Date();
 const iso = (d) => d.toISOString().slice(0, 10);
 const today = iso(now);
 const daysBack = (n) => { const d = new Date(now); d.setDate(d.getDate() - n); return iso(d); };
+
+/* The month the demo actually displays, which is whatever month it is today —
+   the app follows the calendar and has no September in it.
+
+   This used to be hardcoded to September, because that is when the demo was
+   written. On 19 October that silently dropped nineteen of every person's
+   days and every single comment: the dates counted back from today, landed in
+   October, and were filtered out against a September window. The board looked
+   almost empty and nothing said why.
+
+   Deriving the window from today instead means the demo refills itself every
+   month rather than quietly emptying on the 1st. */
+const MONTH_START = `${today.slice(0, 7)}-01`;
+const MONTH_END = iso(new Date(now.getFullYear(), now.getMonth() + 1, 0));
 let photos = 0, entries = 0;
 
 for (const p of PEOPLE) {
   /* Backdate to the earliest day this person actually has, clamped to the 1st.
      Days before you join are neutral rather than missed, so joining today
      would hide the deliberate gaps below. */
-  const dates = p.days.map((_, i) => daysBack(i)).filter(ds => ds >= "2026-09-01");
+  const dates = p.days.map((_, i) => daysBack(i)).filter(ds => ds >= MONTH_START);
   const joined = dates.length ? dates[dates.length - 1] : today;
   await c.query(
     `INSERT INTO users (id, name, emoji, age_band, goal, goals, fitness, pin_hash, created_at)
@@ -189,7 +203,7 @@ for (const p of PEOPLE) {
 
   for (let i = 0; i < p.days.length; i++) {
     const ds = daysBack(i);
-    if (ds < "2026-09-01" || ds > "2026-09-30") continue;
+    if (ds < MONTH_START || ds > MONTH_END) continue;
     const { exercise, fun } = p.days[i];
 
     if (exercise) {
@@ -249,7 +263,7 @@ const COMMENTS = [
 let comments = 0;
 for (const cm of COMMENTS) {
   const ds = daysBack(cm.back);
-  if (ds < "2026-09-01" || ds > "2026-09-30") continue;
+  if (ds < MONTH_START || ds > MONTH_END) continue;
   /* Only lands if the owner actually logged a fun day then — the arrays above
      move with the calendar, so a comment can fall on a missed day. Skipping is
      correct: a comment on nothing would be invisible anyway. */
