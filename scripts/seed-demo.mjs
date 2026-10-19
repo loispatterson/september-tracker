@@ -67,6 +67,55 @@ const PEOPLE = [
     ],
   },
   {
+    /* The one who is not managing it. A board where everyone succeeds is a
+       poster, not a product — Nour misses more than half her days and the
+       demo is more honest, and more reassuring, for having her on it. */
+    id: "u_demo_nour", name: "Nour", emoji: "\u{1F99C}", band: "35-39",
+    goals: "mobility,general", fitness: "occasional",
+    days: [
+      { exercise: { act: "Walk",  min: 30, feel: "easy" }, fun: { text: "Sat in the sun at lunch",   photo: null } },
+      { exercise: null,                                    fun: null },
+      { exercise: null,                                    fun: { text: "Watched the rain",          photo: null } },
+      { exercise: { act: "Yoga",  min: 25, feel: "easy" }, fun: { text: "Phone off after eight",     photo: null } },
+      { exercise: null,                                    fun: null },
+      { exercise: null,                                    fun: null },
+      { exercise: { act: "Walk",  min: 45, feel: "good" }, fun: { text: "Walked the long way home",  photo: "park" } },
+      { exercise: null,                                    fun: { text: "Cake with the neighbours",  photo: null } },
+      { exercise: { act: "Yoga",  min: 30, feel: "good" }, fun: null },
+      { exercise: null,                                    fun: null },
+      { exercise: { act: "Walk",  min: 30, feel: "easy" }, fun: { text: "Finished the crossword",    photo: null } },
+      { exercise: null,                                    fun: null },
+      { exercise: null,                                    fun: { text: "Early night",               photo: null } },
+      { exercise: { act: "Swim",  min: 20, feel: "hard" }, fun: { text: "First swim since June",     photo: null } },
+      { exercise: null,                                    fun: null },
+      { exercise: { act: "Walk",  min: 35, feel: "easy" }, fun: { text: "Bakery on the way in",      photo: "bread" } },
+      { exercise: null,                                    fun: null },
+      { exercise: { act: "Yoga",  min: 25, feel: "easy" }, fun: { text: "Rearranged the shelves",    photo: null } },
+      { exercise: null,                                    fun: null },
+      { exercise: null,                                    fun: { text: "Started again",             photo: null } },
+    ],
+  },
+  {
+    /* The late joiner. Twelve days in, which makes the board show someone
+       mid-start rather than everyone having begun on the 1st. */
+    id: "u_demo_theo", name: "Theo", emoji: "\u{1F99D}", band: "25-29",
+    goals: "strength,cardio", fitness: "regular",
+    days: [
+      { exercise: { act: "Gym",   min: 45, feel: "good" }, fun: { text: "Cooked properly for once",  photo: "recipe" } },
+      { exercise: { act: "Run",   min: 25, feel: "hard" }, fun: { text: "Beat my brother at chess",  photo: "boardgame" } },
+      { exercise: { act: "Gym",   min: 50, feel: "good" }, fun: { text: "New album, start to finish", photo: null } },
+      { exercise: null,                                    fun: { text: "Sat by the river",          photo: null } },
+      { exercise: { act: "Run",   min: 30, feel: "easy" }, fun: { text: "Called Mum",                photo: null } },
+      { exercise: { act: "Gym",   min: 45, feel: "hard" }, fun: { text: "Night sky was clear",       photo: "stars" } },
+      { exercise: { act: "Climb", min: 90, feel: "hard" }, fun: { text: "Topped out at sunset",      photo: "sunset" } },
+      { exercise: null,                                    fun: null },
+      { exercise: { act: "Run",   min: 35, feel: "good" }, fun: { text: "Made it to the market",     photo: null } },
+      { exercise: { act: "Gym",   min: 40, feel: "good" }, fun: { text: "Fixed the bike",            photo: null } },
+      { exercise: { act: "Walk",  min: 30, feel: "easy" }, fun: { text: "Pub quiz, came third",      photo: null } },
+      { exercise: { act: "Gym",   min: 45, feel: "good" }, fun: { text: "Signed up, day one",        photo: null } },
+    ],
+  },
+  {
     id: "u_demo_sam", name: "Sam", emoji: "\u{1F419}", band: "50-54",
     goals: "weightloss,mobility", fitness: "occasional",
     days: [
@@ -115,6 +164,8 @@ for (const stmt of schema) await c.query(stmt);
 
 const ids = PEOPLE.map(p => p.id);
 await c.query("DELETE FROM entry_photos WHERE user_id = ANY($1)", [ids]);
+await c.query("DELETE FROM entry_comments WHERE user_id = ANY($1) OR owner_id = ANY($1)", [ids]);
+await c.query("DELETE FROM photo_likes WHERE user_id = ANY($1)", [ids]);
 await c.query("DELETE FROM entries WHERE user_id = ANY($1)", [ids]);
 await c.query("DELETE FROM sessions WHERE user_id = ANY($1)", [ids]);
 await c.query("DELETE FROM users WHERE id = ANY($1)", [ids]);
@@ -170,6 +221,63 @@ for (const p of PEOPLE) {
   }
 }
 
+/* ---- the social layer ----
+
+   Without this the demo is four people keeping separate diaries, which is not
+   what the product is. Comments and likes are the thing that makes a shared
+   board a shared board, and a visitor who sees none assumes there are none.
+
+   Comments are attached by (owner_id, date, kind), the same composite key
+   entries uses — there is no entry id to reference. Likes are attached to
+   photos, so only photo days can carry them. Both are written after everyone
+   exists, because a comment needs its author and its owner already inserted. */
+const COMMENTS = [
+  { from: "u_demo_sam",  on: "u_demo_ada",  back: 0, text: "That looks incredible" },
+  { from: "u_demo_theo", on: "u_demo_ada",  back: 0, text: "Recipe please" },
+  { from: "u_demo_ada",  on: "u_demo_theo", back: 0, text: "Welcome! You picked a good week" },
+  { from: "u_demo_nour", on: "u_demo_ada",  back: 1, text: "I can see the Plough" },
+  { from: "u_demo_ada",  on: "u_demo_nour", back: 6, text: "That walk is lovely this time of year" },
+  { from: "u_demo_sam",  on: "u_demo_theo", back: 6, text: "90 minutes climbing is not a rest day" },
+  { from: "u_demo_theo", on: "u_demo_sam",  back: 2, text: "Impressive" },
+  { from: "u_demo_nour", on: "u_demo_theo", back: 1, text: "Who won in the end" },
+  { from: "u_demo_ada",  on: "u_demo_sam",  back: 4, text: "Every single day. How" },
+  { from: "u_demo_sam",  on: "u_demo_nour", back: 13, text: "First swim back is always the worst one" },
+  { from: "u_demo_theo", on: "u_demo_ada",  back: 7, text: "Was this the ridge walk?" },
+  { from: "u_demo_ada",  on: "u_demo_theo", back: 11, text: "Good luck!" },
+];
+
+let comments = 0;
+for (const cm of COMMENTS) {
+  const ds = daysBack(cm.back);
+  if (ds < "2026-09-01" || ds > "2026-09-30") continue;
+  /* Only lands if the owner actually logged a fun day then — the arrays above
+     move with the calendar, so a comment can fall on a missed day. Skipping is
+     correct: a comment on nothing would be invisible anyway. */
+  const has = await c.query(
+    `SELECT 1 FROM entries WHERE user_id = $1 AND date = $2 AND kind = 'fun'`, [cm.on, ds]);
+  if (!has.rowCount) continue;
+  await c.query(
+    `INSERT INTO entry_comments (user_id, owner_id, date, kind, body, created_at)
+     VALUES ($1,$2,$3,'fun',$4,$5)`,
+    [cm.from, cm.on, ds, cm.text, `${ds}T19:30:00Z`]);
+  comments++;
+}
+
+/* Likes: everyone likes most of other people's photos, nobody likes their own.
+   Deterministic rather than random so re-running produces the same board. */
+let likes = 0;
+const shots = await c.query(`SELECT id, user_id FROM entry_photos WHERE user_id = ANY($1)`, [ids]);
+for (const shot of shots.rows) {
+  for (const [k, other] of ids.filter((x) => x !== shot.user_id).entries()) {
+    /* Two in three, varied by photo so the counts are not all identical. */
+    if ((shot.id.charCodeAt(shot.id.length - 1) + k) % 3 === 0) continue;
+    await c.query(
+      `INSERT INTO photo_likes (photo_id, user_id) VALUES ($1,$2)
+       ON CONFLICT DO NOTHING`, [shot.id, other]);
+    likes++;
+  }
+}
+
 const n = await c.query(`SELECT (SELECT count(*) FROM users) u,
                                 (SELECT count(*) FROM entries) e,
                                 (SELECT count(*) FROM entry_photos) p,
@@ -177,5 +285,6 @@ const n = await c.query(`SELECT (SELECT count(*) FROM users) u,
 const r = n.rows[0];
 console.log(`demo database seeded: ${r.u} people, ${r.e} entries, ${r.p} photos ` +
             `(${(Number(r.b) / 1024).toFixed(0)} KB)`);
-console.log(`  this run wrote ${entries} entries and ${photos} photos up to ${today}`);
+console.log(`  this run wrote ${entries} entries, ${photos} photos, ` +
+            `${comments} comments and ${likes} likes up to ${today}`);
 await c.end();
