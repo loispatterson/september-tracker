@@ -1,6 +1,20 @@
-# September Tracker
+# A shared daily board
 
-30 minutes of exercise **and** one fun thing, every day of September 2026 — for you and a few friends, on a shared board.
+One codebase, two challenges. Which one a deployment runs is decided by the
+`CHALLENGE` environment variable, and **its absence means the original**, so
+the friends' board gets no new variable and no new code path.
+
+- **`wellbeing`** (the default) — 30 minutes of exercise **and** one fun thing,
+  every day of the month, for you and a few friends.
+- **`movember`** — **Cairn**, *everyone adds a stone*: a daily moustache photo
+  for thirty days, with viewer accounts for people who sponsor and watch rather
+  than grow. Movember is a trademark and their guidelines forbid using the word
+  in a product name, so the app is Cairn and the copy says who it is for.
+
+Every challenge-specific string and rule lives in `js/challenge.js`. Nothing
+else should need to know which challenge it is.
+
+## The wellbeing board
 
 - **Today** — log your 30 minutes (tap an activity, or take one of three workout suggestions tuned to your age band and goal), plus today's fun idea (swap it, or write your own) and a photo of it if you want one.
 - **Photos** — everyone's fun photos as a grid; tap one to enlarge.
@@ -35,18 +49,58 @@ vercel --prod                       # → your shareable URL
 
 Then send friends the URL (and passcode). On a phone, **Share → Add to Home Screen** makes it feel like an app.
 
+## Deploying Cairn
+
+A **separate Vercel project** (`cairn`) with a **separate Neon database**,
+pinned to the `movember` branch and set `CHALLENGE=movember`. `main` stays
+frozen for the duration of the pilot.
+
+Two deployments buy no extra serverless functions — both build the same `api/`
+directory from the same commit, so both sit against the same Hobby limit of
+twelve. The reason for two projects is risk isolation only: no commit that
+could break the friends' board is ever deployed to it.
+
+Deploying is a `git push` to `movember`. Nothing else. `vercel-build` runs
+`scripts/stamp-html.mjs`, which writes the challenge's title, manifest link and
+apple-touch-icon into `index.html` before it is served — iOS reads those from
+the HTML as served, so correcting them from JavaScript afterwards is too late.
+
+Schema changes go to the database **before** the push that needs them, because
+a push deploys immediately and an endpoint that expects a column the database
+hasn't got fails on live signup:
+
+```sh
+printf 'DATABASE_URL=%s\n' '<cairn pooled url>' > .env.cairn.local
+node --env-file=.env.cairn.local scripts/init-db.mjs
+git push origin movember
+```
+
+`schema.sql` is idempotent — every statement is `IF NOT EXISTS` — so running it
+again is safe and is the normal way to apply a migration. `init-db.mjs` splits
+the file naively on `;`, so **no comment or literal in `schema.sql` may contain
+a semicolon**; a test enforces this, because the failure mode is a half-applied
+migration rather than an error.
+
 ## Running the pilot
 
 Three scripts carry the measurement. None of what they record can be
 reconstructed afterwards, so they matter from day one rather than in December.
 
+All three need Cairn's `DATABASE_URL`. Pass it with `--env-file` rather than
+inline, so the connection string stays out of shell history:
+
 ```sh
-npm run totals                      # lists the fundraising pages to read
-npm run totals lois=120 ahmed=45.5  # writes today's figures
-npm run report                      # the four questions, with their caveats
-npm run report 2026-11              # a specific month
-npm run forget <name>               # removes someone completely
+alias cairn='node --env-file=.env.cairn.local'
+
+cairn scripts/record-totals.mjs                     # lists the pages to read
+cairn scripts/record-totals.mjs lois=120 ahmed=45.5 # writes today's figures
+cairn scripts/pilot-report.mjs                      # the four questions
+cairn scripts/pilot-report.mjs 2026-11              # a specific month
+cairn scripts/delete-user.mjs <name>                # removes someone completely
 ```
+
+The `npm run totals` / `report` / `forget` shortcuts do the same thing but read
+`DATABASE_URL` from the environment, so they are for the wellbeing board.
 
 `totals` is deliberately manual. A scraper against someone else's fundraising
 site breaks the week they change their markup, fails quietly, and the readings
